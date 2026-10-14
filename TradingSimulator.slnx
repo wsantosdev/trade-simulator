@@ -25,6 +25,7 @@
   </Folder>
   <Folder Name="/Shared/">
     <Project Path="Shared/TradingSimulator.Commons/TradingSimulator.Commons.csproj" />
+    <Project Path="Shared/TradingSimulator.Testing/TradingSimulator.Testing.csproj" />
   </Folder>
   <Folder Name="/Orders/">
     <File Path="Orders/REQUIREMENTS_ORDERS.md" />
