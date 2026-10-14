@@ -1,5 +1,3 @@
-using TradingSimulator.Account.Common;
-using TradingSimulator.Account.Domain.ValueObjects;
 using TradingSimulator.Account.Infrastructure.Http;
 
 namespace TradingSimulator.Account.Features.OpenAccount;
@@ -8,9 +6,9 @@ public static class OpenAccountEndpoint
 {
     public static IEndpointRouteBuilder MapOpenAccountEndpoint(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapPost("/api/accounts", async (IAccountStore store, CancellationToken cancellationToken) =>
+        endpoints.MapPost("/api/accounts", async (IOpenAccount openAccount, CancellationToken cancellationToken) =>
         {
-            var result = await store.OpenAsync(AccountId.New(), cancellationToken);
+            var result = await openAccount.ExecuteAsync(cancellationToken);
             if (result.IsError)
                 return result.ErrorValue.ToHttpResult();
 

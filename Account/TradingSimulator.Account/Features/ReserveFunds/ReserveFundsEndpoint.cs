@@ -1,5 +1,3 @@
-using TradingSimulator.Account.Common;
-using TradingSimulator.Account.Domain.ValueObjects;
 using TradingSimulator.Account.Infrastructure.Http;
 
 namespace TradingSimulator.Account.Features.ReserveFunds;
@@ -11,14 +9,10 @@ public static class ReserveFundsEndpoint
         endpoints.MapPost("/api/accounts/{id:guid}/reservations", async (
             Guid id,
             ReserveFundsRequest request,
-            IAccountStore store,
+            IReserveFunds reserveFunds,
             CancellationToken cancellationToken) =>
         {
-            var accountId = AccountId.TryCreate(id);
-            if (accountId.IsError)
-                return accountId.ErrorValue.ToHttpResult();
-
-            var result = await store.ExecuteAsync(accountId.ResultValue, current => current.Reserve(request.Amount), cancellationToken);
+            var result = await reserveFunds.ExecuteAsync(id, request.Amount, cancellationToken);
             return result.IsError
                 ? result.ErrorValue.ToHttpResult()
                 : Results.Ok(AccountResponse.From(result.ResultValue));

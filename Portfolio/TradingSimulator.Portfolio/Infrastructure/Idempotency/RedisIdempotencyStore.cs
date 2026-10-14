@@ -1,5 +1,5 @@
 using StackExchange.Redis;
-using TradingSimulator.Portfolio.Common;
+using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 
 namespace TradingSimulator.Portfolio.Infrastructure.Idempotency;
 

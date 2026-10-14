@@ -1,8 +1,8 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
+using TradingSimulator.Exchange.Processors.OfferBook;
 
 namespace TradingSimulator.Exchange.Infrastructure.Messaging;
 
@@ -59,9 +59,11 @@ public sealed class RabbitMqOfferBookInterestConsumer(
         {
             try
             {
-                var result = await processor.ProcessAsync(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options, stoppingToken);
-                if (result.IsError)
+                var command = OfferBookInterestParser.Parse(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options);
+                if (command.IsError)
                     logger.LogWarning("Dropped a malformed offer book interest message.");
+                else
+                    await processor.ProcessAsync(command.ResultValue, stoppingToken);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {

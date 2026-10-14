@@ -1,4 +1,4 @@
-using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Domain.ValueObjects;
 
 namespace TradingSimulator.Exchange.Infrastructure.Messaging;
 

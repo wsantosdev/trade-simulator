@@ -1,14 +1,14 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
+using TradingSimulator.Exchange.Processors.Quotes;
 
 namespace TradingSimulator.Exchange.Infrastructure.Messaging;
 
 public sealed class RabbitMqQuoteInterestConsumer(
     IConfiguration configuration,
-    QuoteInterestProcessor processor,
+    QuoteInterestRegistry registry,
     ILogger<RabbitMqQuoteInterestConsumer> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -57,9 +57,11 @@ public sealed class RabbitMqQuoteInterestConsumer(
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += (_, delivery) =>
         {
-            var result = processor.Process(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options);
-            if (result.IsError)
+            var tickers = QuoteInterestParser.Parse(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options);
+            if (tickers.IsError)
                 logger.LogWarning("Dropped a malformed quote interest message.");
+            else
+                registry.Renew(tickers.ResultValue);
             return Task.CompletedTask;
         };
         // Interest is a heartbeat: a lost message is replaced by the next one, so no acknowledgement is needed.

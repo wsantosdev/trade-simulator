@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Moonad;
 using Npgsql;
 using NpgsqlTypes;
+using TradingSimulator.Orders.Infrastructure.Messaging;
 using TradingSimulator.Orders.Common;
 using TradingSimulator.Orders.Domain;
 using TradingSimulator.Orders.Domain.Entities;

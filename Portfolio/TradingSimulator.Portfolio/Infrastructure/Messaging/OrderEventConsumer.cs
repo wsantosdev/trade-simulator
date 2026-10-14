@@ -1,11 +1,8 @@
-using TradingSimulator.Portfolio.Common;
-using TradingSimulator.Portfolio.Infrastructure.Serialization;
-
 namespace TradingSimulator.Portfolio.Infrastructure.Messaging;
 
 public sealed class OrderEventConsumer(
     IConfiguration configuration,
-    PortfolioCommandProcessor processor,
+    OrderEventMessageHandler handler,
     ILogger<OrderEventConsumer> logger) : RabbitMqConsumerBase(configuration, logger)
 {
     public const string Exchange = "trading-simulator-order-commands";
@@ -16,5 +13,5 @@ public sealed class OrderEventConsumer(
     protected override IReadOnlyList<string> RoutingKeys => [PortfolioEventTypes.OrderSubmitted];
 
     protected override Task HandleAsync(string body, CancellationToken cancellationToken) =>
-        processor.ProcessOrderEventAsync(body, PortfolioJson.Options, cancellationToken);
+        handler.HandleAsync(body, cancellationToken);
 }

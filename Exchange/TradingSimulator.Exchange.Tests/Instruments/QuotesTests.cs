@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Domain.ValueObjects;
+using TradingSimulator.Exchange.Features.ImportQuotes;
 using TradingSimulator.Exchange.Infrastructure.Sources;
 
 namespace TradingSimulator.Exchange.Tests.Instruments;

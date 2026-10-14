@@ -1,4 +1,3 @@
-using TradingSimulator.Account.Common;
 
 namespace TradingSimulator.Account.Infrastructure.Messaging;
 

@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Domain;
 using TradingSimulator.Exchange.Domain.ValueObjects;
 using TradingSimulator.Exchange.Features.ImportInstruments;

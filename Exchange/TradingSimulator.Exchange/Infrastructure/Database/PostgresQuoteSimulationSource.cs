@@ -1,8 +1,8 @@
 using Moonad;
 using Npgsql;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Domain;
 using TradingSimulator.Exchange.Domain.ValueObjects;
+using TradingSimulator.Exchange.Simulation;
 
 namespace TradingSimulator.Exchange.Infrastructure.Database;
 

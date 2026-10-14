@@ -1,3 +1,4 @@
+using TradingSimulator.Orders.Features.Shared;
 using Moonad;
 using TradingSimulator.Orders.Common;
 using TradingSimulator.Orders.Domain;
@@ -11,8 +12,8 @@ public interface IReplaceOrder
     Task<Result<Order, IOrderError>> ExecuteAsync(Guid accountId, Guid orderId, decimal price, CancellationToken cancellationToken);
 }
 
-public sealed class ReplaceOrderHandler(OwnedOrderUpdater updater) : IReplaceOrder
+public sealed class ReplaceOrderHandler(OrderModifier modifier) : IReplaceOrder
 {
     public Task<Result<Order, IOrderError>> ExecuteAsync(Guid accountId, Guid orderId, decimal price, CancellationToken cancellationToken) =>
-        updater.UpdateAsync(accountId, orderId, (order, now) => order.RequestReplace(price, now), cancellationToken);
+        modifier.ModifyAsync(accountId, orderId, (order, now) => order.RequestReplace(price, now), cancellationToken);
 }

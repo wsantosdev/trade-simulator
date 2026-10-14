@@ -1,14 +1,14 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
+using TradingSimulator.Exchange.Processors.OrderCommands;
 
 namespace TradingSimulator.Exchange.Infrastructure.Messaging;
 
 public sealed class RabbitMqOrderCommandConsumer(
     IConfiguration configuration,
-    OrderCommandProcessor processor,
+    OrderBookEngine engine,
     ILogger<RabbitMqOrderCommandConsumer> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -58,9 +58,11 @@ public sealed class RabbitMqOrderCommandConsumer(
         {
             try
             {
-                var result = await processor.ProcessAsync(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options, stoppingToken);
-                if (result.IsError)
+                var command = OrderCommandParser.Parse(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options);
+                if (command.IsError)
                     logger.LogWarning("Dropped a malformed order command ({RoutingKey}).", delivery.RoutingKey);
+                else
+                    await engine.HandleAsync(command.ResultValue, stoppingToken);
                 await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

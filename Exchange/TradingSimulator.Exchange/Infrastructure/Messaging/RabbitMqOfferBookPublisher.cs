@@ -1,8 +1,10 @@
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
-using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Domain.Enums;
+using TradingSimulator.Exchange.Domain.ValueObjects;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
+using TradingSimulator.Exchange.Processors.OfferBook;
 
 namespace TradingSimulator.Exchange.Infrastructure.Messaging;
 
@@ -12,11 +14,25 @@ public sealed class RabbitMqOfferBookPublisher(IConfiguration configuration) : I
     private IConnection? _connection;
     private IChannel? _channel;
 
-    public Task PublishSnapshotAsync(EventEnvelope<OfferBookSnapshot> envelope, CancellationToken cancellationToken) =>
-        PublishAsync(envelope, envelope.Event.Ticker, cancellationToken);
+    public Task PublishSnapshotAsync(BookSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        var message = new OfferBookSnapshot(
+            snapshot.Ticker.Value, snapshot.Sequence, snapshot.Phase, ToLevels(snapshot.Bids), ToLevels(snapshot.Asks), snapshot.Timestamp);
+        return PublishAsync(EventEnvelope.Of(message), message.Ticker, cancellationToken);
+    }
 
-    public Task PublishDeltaAsync(EventEnvelope<OfferBookDelta> envelope, CancellationToken cancellationToken) =>
-        PublishAsync(envelope, envelope.Event.Ticker, cancellationToken);
+    public Task PublishDeltaAsync(BookDelta delta, CancellationToken cancellationToken)
+    {
+        var message = new OfferBookDelta(
+            delta.Ticker.Value, delta.Sequence, delta.PreviousSequence, delta.Phase, [.. delta.Changes.Select(ToChange)], delta.Timestamp);
+        return PublishAsync(EventEnvelope.Of(message), message.Ticker, cancellationToken);
+    }
+
+    private static IReadOnlyList<OfferBookLevel> ToLevels(IReadOnlyList<BookLevel> levels) =>
+        [.. levels.Select(level => new OfferBookLevel(level.Price.Value, level.Quantity.Value, level.Orders))];
+
+    private static OfferBookChange ToChange(BookChange change) => new(
+        change.Side == OrderSide.Buy ? OfferBookSide.Bid : OfferBookSide.Ask, change.Price.Value, change.Quantity.Value, change.Orders);
 
     private async Task PublishAsync<T>(EventEnvelope<T> envelope, string ticker, CancellationToken cancellationToken)
     {

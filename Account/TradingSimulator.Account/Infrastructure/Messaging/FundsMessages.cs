@@ -1,5 +1,5 @@
-using TradingSimulator.Account.Domain;
-using TradingSimulator.Account.Domain.ValueObjects;
+using TradingSimulator.Account.Domain.Enums;
+using TradingSimulator.Account.Processors.OrderFunds;
 
 namespace TradingSimulator.Account.Infrastructure.Messaging;
 
@@ -13,26 +13,6 @@ public static class FundsEventTypes
     public const string ReservationResult = "FundsReservationResult";
     public const string ReservedRoutingKey = "funds.reserved";
     public const string FailedRoutingKey = "funds.reservation.failed";
-}
-
-public enum OrderSide : byte
-{
-    Buy = 1,
-    Sell = 2
-}
-
-public enum OrderType : byte
-{
-    Market = 1,
-    Limit = 2
-}
-
-public enum FundsReservationErrorKind : byte
-{
-    InsufficientFunds,
-    AccountNotFound,
-    PriceUnavailable,
-    InvalidOrder
 }
 
 public sealed record FundsReservedMessage(Guid OrderId, Guid AccountId, decimal Amount);

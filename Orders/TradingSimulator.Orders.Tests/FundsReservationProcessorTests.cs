@@ -9,6 +9,9 @@ using TradingSimulator.Orders.Domain.Events;
 using TradingSimulator.Orders.Domain.ValueObjects;
 using TradingSimulator.Orders.Infrastructure.Messaging;
 using TradingSimulator.Orders.Infrastructure.Serialization;
+using TradingSimulator.Orders.Processors.AssetReservation;
+using TradingSimulator.Orders.Processors.OrderTransition;
+using TradingSimulator.Orders.Processors.FundsReservation;
 
 namespace TradingSimulator.Orders.Tests;
 
@@ -78,8 +81,8 @@ public sealed class FundsReservationProcessorTests
         var (outcomes, s, n) = Create(order);
         store = s;
         notifier = n;
-        return new FundsReservationProcessor(outcomes, NullLogger<FundsReservationProcessor>.Instance)
-            .ProcessAsync(body, OrderJson.Options, default);
+        var processor = new FundsReservationProcessor(outcomes, NullLogger<FundsReservationProcessor>.Instance);
+        return new FundsReservationMessageHandler(processor, NullLogger<FundsReservationMessageHandler>.Instance).HandleAsync(body, default);
     }
 
     private static Task Assets(Order order, string body, out FakeStore store, out FakeNotifier notifier)
@@ -87,8 +90,8 @@ public sealed class FundsReservationProcessorTests
         var (outcomes, s, n) = Create(order);
         store = s;
         notifier = n;
-        return new AssetReservationProcessor(outcomes, NullLogger<AssetReservationProcessor>.Instance)
-            .ProcessAsync(body, OrderJson.Options, default);
+        var processor = new AssetReservationProcessor(outcomes, NullLogger<AssetReservationProcessor>.Instance);
+        return new AssetReservationMessageHandler(processor, NullLogger<AssetReservationMessageHandler>.Instance).HandleAsync(body, default);
     }
 
     [Fact]

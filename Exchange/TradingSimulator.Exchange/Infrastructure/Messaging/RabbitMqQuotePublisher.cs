@@ -1,8 +1,9 @@
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
-using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Domain.ValueObjects;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
+using TradingSimulator.Exchange.Processors.Quotes;
 
 namespace TradingSimulator.Exchange.Infrastructure.Messaging;
 
@@ -12,8 +13,9 @@ public sealed class RabbitMqQuotePublisher(IConfiguration configuration) : IQuot
     private IConnection? _connection;
     private IChannel? _channel;
 
-    public async Task PublishAsync(EventEnvelope<Quote> envelope, CancellationToken cancellationToken)
+    public async Task PublishAsync(Quote quote, CancellationToken cancellationToken)
     {
+        var envelope = EventEnvelope.Of(quote);
         await _gate.WaitAsync(cancellationToken);
         try
         {

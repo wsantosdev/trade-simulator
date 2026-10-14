@@ -1,7 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
-using TradingSimulator.Portfolio.Common;
+using Moonad;
+using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 using TradingSimulator.Portfolio.Infrastructure.Serialization;
 
 namespace TradingSimulator.Portfolio.Infrastructure.Messaging;
@@ -16,8 +17,13 @@ public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IR
     private readonly HashSet<string> _declared = [];
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public Task PublishFailureAsync(PortfolioResponse response, CancellationToken cancellationToken) =>
-        PublishAsync(ExchangeName, FailedRoutingKey, JsonSerializer.Serialize(response, PortfolioJson.Options), cancellationToken);
+    public Task PublishFailureAsync(PortfolioCommandError failure, CancellationToken cancellationToken)
+    {
+        var response = new PortfolioResponse(
+            Guid.CreateVersion7(), PortfolioEventTypes.CommandResult,
+            Result<PortfolioCommandResult, PortfolioCommandError>.Error(failure));
+        return PublishAsync(ExchangeName, FailedRoutingKey, JsonSerializer.Serialize(response, PortfolioJson.Options), cancellationToken);
+    }
 
     public Task PublishPendingAsync(PendingResponse pending, CancellationToken cancellationToken) =>
         PublishAsync(pending.Exchange ?? ExchangeName, pending.RoutingKey, pending.Payload, cancellationToken);

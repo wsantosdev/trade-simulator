@@ -1,6 +1,5 @@
 using System.Text;
 using RabbitMQ.Client;
-using TradingSimulator.Account.Common;
 
 namespace TradingSimulator.Account.Infrastructure.Messaging;
 

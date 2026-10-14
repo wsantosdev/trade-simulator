@@ -2,11 +2,13 @@ using Moonad;
 using Npgsql;
 using TradingSimulator.Exchange.Domain;
 using TradingSimulator.Exchange.Domain.ValueObjects;
-using TradingSimulator.Exchange.Features.QueryInstruments;
+using TradingSimulator.Exchange.Features.GetInstrument;
+using TradingSimulator.Exchange.Features.SearchInstruments;
+using TradingSimulator.Exchange.Features.Shared;
 
 namespace TradingSimulator.Exchange.Infrastructure.Database;
 
-public sealed class PostgresInstrumentQueries(NpgsqlDataSource dataSource) : IInstrumentQueries
+public sealed class PostgresInstrumentQueries(NpgsqlDataSource dataSource) : IInstrumentSearch, IInstrumentLookup
 {
     public async Task<InstrumentPage> SearchAsync(string? text, int page, CancellationToken cancellationToken)
     {
@@ -24,8 +26,8 @@ public sealed class PostgresInstrumentQueries(NpgsqlDataSource dataSource) : IIn
 
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("term", string.IsNullOrEmpty(term) ? DBNull.Value : EscapeLike(term));
-        command.Parameters.AddWithValue("limit", IInstrumentQueries.PageSize);
-        command.Parameters.AddWithValue("offset", (page - 1) * IInstrumentQueries.PageSize);
+        command.Parameters.AddWithValue("limit", IInstrumentSearch.PageSize);
+        command.Parameters.AddWithValue("offset", (page - 1) * IInstrumentSearch.PageSize);
 
         var items = new List<InstrumentItem>();
         long totalCount = 0;
@@ -36,7 +38,7 @@ public sealed class PostgresInstrumentQueries(NpgsqlDataSource dataSource) : IIn
             totalCount = reader.GetInt64(3);
         }
 
-        return new InstrumentPage(items, page, IInstrumentQueries.PageSize, totalCount);
+        return new InstrumentPage(items, page, IInstrumentSearch.PageSize, totalCount);
     }
 
     public async Task<Result<InstrumentItem, IExchangeError>> GetAsync(Ticker ticker, CancellationToken cancellationToken)

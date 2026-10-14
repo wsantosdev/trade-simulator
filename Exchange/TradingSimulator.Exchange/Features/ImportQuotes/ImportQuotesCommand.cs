@@ -1,4 +1,4 @@
-using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Domain.ValueObjects;
 using TradingSimulator.Exchange.Infrastructure.Http;
 
 namespace TradingSimulator.Exchange.Features.ImportQuotes;

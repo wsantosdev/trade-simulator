@@ -2,7 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using NpgsqlTypes;
-using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Features.ImportInstruments;
 
 namespace TradingSimulator.Exchange.Infrastructure.Database;
 

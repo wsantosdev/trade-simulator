@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using TradingSimulator.Portfolio.Common;
+using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 using TradingSimulator.Portfolio.Infrastructure.Messaging;
 
 namespace TradingSimulator.Portfolio.Infrastructure.Serialization;

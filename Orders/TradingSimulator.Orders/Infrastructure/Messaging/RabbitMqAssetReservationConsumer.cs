@@ -1,10 +1,8 @@
-using TradingSimulator.Orders.Infrastructure.Serialization;
-
 namespace TradingSimulator.Orders.Infrastructure.Messaging;
 
 public sealed class RabbitMqAssetReservationConsumer(
     IConfiguration configuration,
-    AssetReservationProcessor processor,
+    AssetReservationMessageHandler handler,
     ILogger<RabbitMqAssetReservationConsumer> logger) : RabbitMqReservationConsumerBase(configuration, logger)
 {
     public const string Exchange = "trading-simulator.portfolio.reservations";
@@ -15,5 +13,5 @@ public sealed class RabbitMqAssetReservationConsumer(
     protected override string Description => "asset reservation";
 
     protected override Task ProcessAsync(string body, CancellationToken cancellationToken) =>
-        processor.ProcessAsync(body, OrderJson.Options, cancellationToken);
+        handler.HandleAsync(body, cancellationToken);
 }

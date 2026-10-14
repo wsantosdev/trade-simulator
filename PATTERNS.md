@@ -7,8 +7,8 @@ As diretrizes a seguir devem ser observadas durante o desenvolvimento do projeto
 - A solution principal deve se chamar `TradingSimulator.slnx`. Organize a solução em **solution folders por módulo de negócio**; cada pasta de módulo representa uma fronteira de microsserviço e contém o projeto executável desse microsserviço, seus projetos de teste e os projetos/arquivos de interface relacionados. Exemplo: `/Account/` contém `TradingSimulator.Account`, `TradingSimulator.Account.Tests` e `Account UI`. Ao iniciar um novo módulo, crie uma nova solution folder e seu projeto de microsserviço independente, sem agrupar projetos de módulos distintos na mesma pasta.
 - Utilize **Ports & Adapters (Hexagonal)** de forma estrita (referência: módulo Orders). Regras:
   - **Domain** é puro: sem referência a framework, serialização, banco ou mensageria.
-  - **Portas de entrada (inbound)** são interfaces que expõem um manipulador (handler) de comando ou consulta (`ISubmitOrder`, `ICancelOrder`, `IQueryOrders`, `IQueryOrderHistory`, `IOrderTransitions`), recebem comandos/valores tipados e retornam `Result<T, IError>`. Ficam no mesmo arquivo do caso de uso que as implementa.
-  - **Portas de saída (driven)** (`IOrderStore`, `IOutbox`, `IOrderNotifier`, `ICommandPublisher`, `IOrderSearch`, `IOrderHistory`) são interfaces pertencentes à aplicação, em `Common/` quando compartilhadas ou na fatia que as usa; suas implementações ficam somente em `Infrastructure/`.
+  - **Portas de entrada (inbound)** são interfaces que expõem um manipulador (handler) de comando ou consulta (`ISubmitOrder`, `ICancelOrder`, `IQueryOrders`, `IQueryOrderHistory`), recebem comandos/valores tipados e retornam `Result<T, IError>`. Ficam no mesmo arquivo do caso de uso que as implementa.
+  - **Portas de saída (driven)** (`IOrderStore`, `IOrderNotifier`, `IOrderSearch`, `IOrderHistory`) são interfaces pertencentes à aplicação: em `Common/` quando usadas por Features e Processors, ou na fatia que as usa quando só uma a usa. Contratos internos da entrega de mensagens (`IOutbox`, `ICommandPublisher`, `PendingEvent`) não são portas da aplicação e ficam em `Infrastructure/Messaging`. As implementações ficam somente em `Infrastructure/`.
   - **Handlers** (aplicação) não referenciam ASP.NET, SignalR, `System.Text.Json`, Npgsql nem RabbitMQ, e nunca dependem de `Infrastructure/`.
   - **Adaptadores de entrada** traduzem o protocolo em chamadas às portas de entrada, sem regra de negócio: endpoints HTTP (`*Endpoint.cs`, dentro da fatia) e consumidores de mensagens (`Infrastructure/Messaging`, que desserializam o `EventEnvelope<T>`, descartam mensagens malformadas e chamam a porta com valores tipados). Contratos de mensagens (`*Message`) pertencem a `Infrastructure/Messaging`.
   - **Adaptadores de saída** (`Infrastructure/Database`, `Messaging`, `Realtime`) implementam as portas de saída. Detalhes de protocolo (JSON, hub SignalR, mapeamento erro→HTTP e DTOs de resposta HTTP em `Infrastructure/Http`) nunca vazam para o domínio ou para os casos de uso.
@@ -16,8 +16,11 @@ As diretrizes a seguir devem ser observadas durante o desenvolvimento do projeto
 - Implemente funcionalidades seguindo **Vertical Slices**. Uma **feature é exclusivamente um caso de uso**, e um caso de uso é um **comando** (altera estado) ou uma **consulta** (apenas lê); nada que não seja um comando ou consulta é uma feature (consumidores de mensagens, publicadores, hubs e demais integrações são adaptadores em `Infrastructure/`). Cada feature fica em sua própria pasta em `Features/`, na raiz do projeto, contendo tudo de que precisa para funcionar (endpoint, request/command, caso de uso e sua porta de entrada, portas de saída específicas e tipos de leitura). Não existem pastas separadas `Api/` e `Application/`. Não concentre vários casos de uso em um arquivo/classe genérico; e não transforme integração (ex.: eventos da bolsa) em "feature": feature é caso de uso.
 - Esta organização vale para **todos os módulos** (Account, Exchange, OfferBook, Orders, Portfolio, Quotes). Organização na raiz de cada projeto de módulo:
   - `Features/<CasoDeUso>/`: fatias (`SubmitOrder`, `CancelOrder`, `ReplaceOrder`, `QueryOrders`, `QueryOrderHistory`...).
-  - `Common/`: somente o que é realmente compartilhado entre fatias (portas de saída compartilhadas, `PendingEvent`, serviços de aplicação compartilhados como `OrderTransitions` e modelos de leitura como `OrderView`). `Common` nunca depende de `Features/`.
+  - `Common/` (somente quando houver algo compartilhado): portas de saída e tipos de contrato usados tanto por `Features/` quanto por `Processors/` (`IOrderStore`, `IOrderNotifier`, `OrderView`; no Quotes, `Quote` e `LatestQuotes`). Nunca depende de `Features/` nem de `Processors/`.
+  - `Features/Shared/`: somente o que é compartilhado entre features (`OrderModifier`, `IAccountStore`, `InstrumentItem`). Uma feature nunca depende de outra. Cada caso de uso tem seu handler e sua porta de entrada; o endpoint só faz a tradução HTTP.
   - `Domain/Entities`, `Domain/ValueObjects`, `Domain/Enums`, `Domain/Events` (o tipo-base `OrderEvent` e todos os eventos que o estendem) e os erros de domínio.
+  - `Processors/<CasoDeUso>/` (o lado worker: reações a mensagens recebidas de outros módulos; Orders `FundsReservation`, `AssetReservation`, `OrderTransition`; Account `OrderFunds`; Portfolio `PortfolioCommands`; Exchange `OrderCommands`, `OfferBook`, `Quotes`; Quotes `QuoteUpdates`, `QuoteInterest`; OfferBook `OfferBookUpdates`, `OfferBookInterest`): cada pasta é um caso de uso acionado por mensagem, com seu processor, suas portas e os tipos neutros que ele recebe. Os consumidores e os `*MessageHandler` em `Infrastructure/Messaging` fazem o parse (envelope, JSON, contratos `*Message`), descartam mensagens malformadas e entregam valores tipados ao processor; os adaptadores de saída montam os envelopes. `Processors` nunca importa `Infrastructure` nem `Features`. Serviços usados só pelos processors (como `OrderTransitions`) ficam na pasta do caso de uso que os usa.
+  - `Simulation/` (quando houver): geração de dados sintéticos (como a simulação de pregão do Exchange); não é domínio nem infraestrutura.
   - `Infrastructure/Database`, `Infrastructure/Messaging`, `Infrastructure/Realtime`, `Infrastructure/Http`, `Infrastructure/Serialization` (e outras pastas por função, como `Sources`, `Simulation` ou `Idempotency`, quando houver): agrupados pelo que cada componente faz.
   - Namespaces seguem as pastas (`TradingSimulator.Orders.Features.SubmitOrder`).
 - Mantenha cada evento de domínio em um arquivo próprio em `Domain/Events`, com namespace `<Projeto>.Domain.Events`.
@@ -31,12 +34,7 @@ Estrutura de referência (módulo Orders):
 ```text
 TradingSimulator.Orders/
 ├── Program.cs
-├── Common/
-│   ├── IOrderStore.cs, IOutbox.cs, IOrderNotifier.cs, ICommandPublisher.cs
-│   ├── PendingEvent.cs
-│   ├── OrderView.cs (OrderView e OrderChanges)
-│   ├── OrderTransitions.cs (IOrderTransitions)
-│   └── OwnedOrderUpdater.cs
+├── Common/ (IOrderStore, IOrderNotifier, OrderView e OrderChanges)
 ├── Domain/
 │   ├── Entities/Order.cs
 │   ├── ValueObjects/ (OrderId, AccountId, Ticker, RequestHash)
@@ -48,10 +46,15 @@ TradingSimulator.Orders/
 │   ├── CancelOrder/ (CancelOrderEndpoint, CancelOrderHandler)
 │   ├── ReplaceOrder/ (ReplaceOrderEndpoint, ReplaceOrderHandler)
 │   ├── QueryOrders/ (SearchOrdersEndpoint, QueryOrdersHandler, IOrderSearch)
-│   └── QueryOrderHistory/ (QueryOrderHistoryEndpoint, QueryOrderHistoryHandler, IOrderHistory)
+│   ├── QueryOrderHistory/ (QueryOrderHistoryEndpoint, QueryOrderHistoryHandler, IOrderHistory)
+│   └── Shared/ (OrderModifier)
+├── Processors/
+│   ├── FundsReservation/ (FundsReservationProcessor)
+│   ├── AssetReservation/ (AssetReservationProcessor)
+│   └── OrderTransition/ (OrderTransitionProcessor, OrderTransitions, ExchangeEvent)
 └── Infrastructure/
     ├── Database/ (PostgresOrderStore, PostgresOrderSearch, PostgresOrderHistory, schema.sql...)
-    ├── Messaging/ (consumidores/publicadores RabbitMQ, processadores, contratos *Message)
+    ├── Messaging/ (consumidores/publicadores RabbitMQ, *MessageHandler, outbox, contratos *Message)
     ├── Realtime/ (OrdersHub, SignalROrderNotifier)
     ├── Http/ (OrderResponse, OrderErrorHttpResults)
     └── Serialization/

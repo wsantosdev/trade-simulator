@@ -1,7 +1,8 @@
 using Npgsql;
 using NpgsqlTypes;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Domain.ValueObjects;
+using TradingSimulator.Exchange.Features.ImportInstruments;
+using TradingSimulator.Exchange.Features.ImportQuotes;
 
 namespace TradingSimulator.Exchange.Infrastructure.Database;
 

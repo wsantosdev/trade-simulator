@@ -7,6 +7,7 @@ using TradingSimulator.Portfolio.Domain.Enums;
 using TradingSimulator.Portfolio.Domain.ValueObjects;
 using TradingSimulator.Portfolio.Infrastructure.Messaging;
 using TradingSimulator.Portfolio.Infrastructure.Serialization;
+using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 
 namespace TradingSimulator.Portfolio.Tests;
 

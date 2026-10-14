@@ -1,8 +1,9 @@
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
-using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Domain.Events;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
+using TradingSimulator.Exchange.Processors.OrderCommands;
 
 namespace TradingSimulator.Exchange.Infrastructure.Messaging;
 
@@ -12,8 +13,11 @@ public sealed class RabbitMqOrderEventPublisher(IConfiguration configuration) : 
     private IConnection? _connection;
     private IChannel? _channel;
 
-    public async Task PublishAsync(EventEnvelope<object> envelope, CancellationToken cancellationToken)
+    public async Task PublishAsync(Guid eventId, OrderEvent orderEvent, CancellationToken cancellationToken)
     {
+        var message = ToMessage(orderEvent);
+        var eventType = message.GetType().Name.Replace("Message", string.Empty, StringComparison.Ordinal);
+        var envelope = new EventEnvelope<object>(eventId, eventType, message);
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -33,6 +37,19 @@ public sealed class RabbitMqOrderEventPublisher(IConfiguration configuration) : 
             _gate.Release();
         }
     }
+
+    private static object ToMessage(OrderEvent orderEvent) => orderEvent switch
+    {
+        OrderAcked e => new OrderAckedMessage(e.OrderId),
+        OrderRejected e => new OrderRejectedMessage(e.OrderId),
+        OrderPartiallyFilled e => new OrderPartiallyFilledMessage(e.OrderId, e.Executed.Value, e.Remaining.Value, e.ExecutionPrice.Value),
+        OrderFilled e => new OrderFilledMessage(e.OrderId, e.Executed.Value, e.ExecutionPrice.Value),
+        OrderCancelled e => new OrderCancelledMessage(e.OrderId, e.Executed.Value, e.Remaining.Value),
+        OrderReplaced e => new OrderReplacedMessage(e.OrderId, e.Executed.Value, e.Remaining.Value),
+        OrderCancelRejected e => new OrderCancelRejectedMessage(e.OrderId),
+        OrderReplaceRejected e => new OrderReplaceRejectedMessage(e.OrderId),
+        _ => throw new ArgumentOutOfRangeException(nameof(orderEvent), orderEvent, "Unknown order event.")
+    };
 
     private async Task<IChannel> EnsureChannelAsync(CancellationToken cancellationToken)
     {

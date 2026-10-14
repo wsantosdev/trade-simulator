@@ -1,7 +1,4 @@
-using TradingSimulator.Portfolio.Common;
-using TradingSimulator.Portfolio.Domain;
 using TradingSimulator.Portfolio.Domain.Enums;
-using TradingSimulator.Portfolio.Domain.ValueObjects;
 
 namespace TradingSimulator.Portfolio.Infrastructure.Messaging;
 
@@ -29,16 +26,6 @@ public sealed record OrderSubmittedMessage(Guid OrderId, Guid AccountId, string?
 public sealed record OrderFillMessage(Guid OrderId, long ExecutedQuantity);
 public sealed record OrderClosureMessage(Guid OrderId);
 
-public enum AssetBlockErrorKind : byte
-{
-    InsufficientQuantity,
-    AssetNotFound,
-    InvalidOrder
-}
-
-public sealed record AssetsBlocked(Guid OrderId, Guid AccountId, string Ticker, long Quantity);
-public sealed record AssetBlockError(Guid OrderId, Guid AccountId, string Ticker, AssetBlockErrorKind Kind, string Message);
-
 public static class AssetReservationEvents
 {
     public const string Exchange = "trading-simulator.portfolio.reservations";
@@ -46,6 +33,3 @@ public static class AssetReservationEvents
     public const string BlockedRoutingKey = "assets.blocked";
     public const string FailedRoutingKey = "assets.block.failed";
 }
-
-// Per-order custody of a sell order: Blocked is what was reserved, Remaining what is still blocked for it.
-public sealed record OrderReservation(Guid OrderId, Guid AccountId, string Ticker, long Blocked, long Remaining, bool Closed);

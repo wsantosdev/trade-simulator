@@ -2,12 +2,14 @@ using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
 using StackExchange.Redis;
 using TradingSimulator.Portfolio.Common;
-using TradingSimulator.Portfolio.Features.QueryAssets;
+using TradingSimulator.Portfolio.Features.GetAsset;
+using TradingSimulator.Portfolio.Features.SearchAssets;
 using TradingSimulator.Portfolio.Infrastructure.Database;
 using TradingSimulator.Portfolio.Infrastructure.Idempotency;
 using TradingSimulator.Portfolio.Infrastructure.Messaging;
 using TradingSimulator.Portfolio.Infrastructure.Realtime;
 using TradingSimulator.Portfolio.Infrastructure.Serialization;
+using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Portfolio");
@@ -36,11 +38,18 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 builder.Services.AddSingleton<PostgresAssetStore>();
 builder.Services.AddSingleton<IAssetStore>(sp => sp.GetRequiredService<PostgresAssetStore>());
 builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresAssetStore>());
-builder.Services.AddSingleton<IAssetQueries, PostgresAssetQueries>();
+builder.Services.AddSingleton<PostgresAssetQueries>();
+builder.Services.AddSingleton<IAssetSearch>(sp => sp.GetRequiredService<PostgresAssetQueries>());
+builder.Services.AddSingleton<IAssetLookup>(sp => sp.GetRequiredService<PostgresAssetQueries>());
+builder.Services.AddSingleton<ISearchAssets, SearchAssetsHandler>();
+builder.Services.AddSingleton<IGetAsset, GetAssetHandler>();
 builder.Services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
 builder.Services.AddSingleton<IResponsePublisher, RabbitMqResponsePublisher>();
 builder.Services.AddSingleton<IAssetNotifier, SignalRAssetNotifier>();
 builder.Services.AddSingleton<PortfolioCommandProcessor>();
+builder.Services.AddSingleton<PortfolioCommandMessageHandler>();
+builder.Services.AddSingleton<OrderEventMessageHandler>();
+builder.Services.AddSingleton<ExchangeEventMessageHandler>();
 builder.Services.AddHostedService<ResponseOutboxPublisherService>();
 builder.Services.AddHostedService<PortfolioCommandConsumer>();
 builder.Services.AddHostedService<OrderEventConsumer>();
@@ -88,7 +97,8 @@ app.UseCors();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
-app.MapAssetQueryEndpoints();
+app.MapSearchAssetsEndpoint();
+app.MapGetAssetEndpoint();
 app.MapHub<PortfolioHub>(PortfolioHub.Route);
 app.Run();
 

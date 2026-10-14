@@ -1,7 +1,9 @@
 using TradingSimulator.OfferBook.Common;
-using TradingSimulator.OfferBook.Features.QueryOfferBook;
+using TradingSimulator.OfferBook.Features.GetOfferBook;
 using TradingSimulator.OfferBook.Infrastructure.Messaging;
 using TradingSimulator.OfferBook.Infrastructure.Realtime;
+using TradingSimulator.OfferBook.Processors.OfferBookInterest;
+using TradingSimulator.OfferBook.Processors.OfferBookUpdates;
 using TradingSimulator.OfferBook.Infrastructure.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +23,7 @@ builder.Services.AddSignalR().AddJsonProtocol(options =>
 builder.Services.AddSingleton<LatestOfferBooks>();
 builder.Services.AddSingleton<OfferBookSubscriptions>();
 builder.Services.AddSingleton<OfferBookProcessor>();
+builder.Services.AddSingleton<IGetOfferBook, GetOfferBookHandler>();
 builder.Services.AddSingleton<OfferBookInterestHeartbeat>();
 builder.Services.AddSingleton<IOfferBookNotifier, SignalROfferBookNotifier>();
 builder.Services.AddSingleton<RabbitMqOfferBookInterestPublisher>();
@@ -44,7 +47,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapOfferBookQueryEndpoints();
+app.MapGetOfferBookEndpoint();
 app.MapHub<OfferBookHub>(OfferBookHub.Route);
 app.Run();
 

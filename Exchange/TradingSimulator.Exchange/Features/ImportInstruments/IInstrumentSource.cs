@@ -1,4 +1,3 @@
-using TradingSimulator.Exchange.Common;
 
 namespace TradingSimulator.Exchange.Features.ImportInstruments;
 

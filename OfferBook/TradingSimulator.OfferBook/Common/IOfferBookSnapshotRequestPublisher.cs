@@ -1,5 +1,3 @@
-using TradingSimulator.OfferBook.Infrastructure.Messaging;
-
 namespace TradingSimulator.OfferBook.Common;
 
 public interface IOfferBookSnapshotRequestPublisher

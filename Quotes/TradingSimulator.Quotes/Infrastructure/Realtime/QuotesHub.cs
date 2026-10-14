@@ -1,3 +1,4 @@
+using TradingSimulator.Quotes.Processors.QuoteInterest;
 using Microsoft.AspNetCore.SignalR;
 using TradingSimulator.Quotes.Common;
 using TradingSimulator.Quotes.Domain.ValueObjects;

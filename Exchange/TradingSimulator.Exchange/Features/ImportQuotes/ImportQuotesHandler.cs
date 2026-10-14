@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Moonad;
-using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Features.Shared;
 using TradingSimulator.Exchange.Domain;
 using TradingSimulator.Exchange.Domain.ValueObjects;
 

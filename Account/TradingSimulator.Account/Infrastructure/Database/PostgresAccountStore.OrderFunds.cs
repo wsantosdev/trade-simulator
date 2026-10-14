@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Moonad;
 using Npgsql;
-using TradingSimulator.Account.Common;
+using TradingSimulator.Account.Processors.OrderFunds;
 using TradingSimulator.Account.Domain;
 using TradingSimulator.Account.Domain.ValueObjects;
 using TradingSimulator.Account.Infrastructure.Messaging;
@@ -16,7 +16,6 @@ public sealed partial class PostgresAccountStore
         OrderId orderId,
         AccountId accountId,
         decimal amount,
-        FundsReservationResponse success,
         CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
@@ -56,6 +55,11 @@ public sealed partial class PostgresAccountStore
                 await insert.ExecuteNonQueryAsync(cancellationToken);
             }
 
+            var success = new FundsReservationResponse(
+                Guid.CreateVersion7(),
+                FundsEventTypes.ReservationResult,
+                Result<FundsReservedMessage, FundsReservationError>.Ok(
+                    new FundsReservedMessage(orderId.Guid, accountId.Guid, amount)));
             await EnqueueResponseAsync(connection, transaction, FundsEventTypes.ReservedRoutingKey, success, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return OrderFundsOutcome.Applied;
@@ -70,7 +74,7 @@ public sealed partial class PostgresAccountStore
         Guid envelopeId,
         OrderId orderId,
         string reason,
-        FundsReservationResponse? failure,
+        FundsReservationFailure? failure,
         CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
@@ -98,7 +102,14 @@ public sealed partial class PostgresAccountStore
             }
 
             if (failure is not null)
-                await EnqueueResponseAsync(connection, transaction, FundsEventTypes.FailedRoutingKey, failure, cancellationToken);
+            {
+                var response = new FundsReservationResponse(
+                    Guid.CreateVersion7(),
+                    FundsEventTypes.ReservationResult,
+                    Result<FundsReservedMessage, FundsReservationError>.Error(
+                        new FundsReservationError(failure.OrderId, failure.AccountId, failure.Kind, failure.Reason)));
+                await EnqueueResponseAsync(connection, transaction, FundsEventTypes.FailedRoutingKey, response, cancellationToken);
+            }
 
             await transaction.CommitAsync(cancellationToken);
             return OrderFundsOutcome.Applied;

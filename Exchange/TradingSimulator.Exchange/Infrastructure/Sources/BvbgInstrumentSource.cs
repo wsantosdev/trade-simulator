@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Xml;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Features.ImportInstruments;
 
 namespace TradingSimulator.Exchange.Infrastructure.Sources;

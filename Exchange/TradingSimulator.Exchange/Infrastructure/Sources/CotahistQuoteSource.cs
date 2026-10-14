@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Features.ImportQuotes;
 
 namespace TradingSimulator.Exchange.Infrastructure.Sources;

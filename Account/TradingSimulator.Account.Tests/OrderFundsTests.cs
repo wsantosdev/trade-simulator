@@ -4,11 +4,12 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
 using Xunit;
-using TradingSimulator.Account.Common;
 using TradingSimulator.Account.Domain;
+using TradingSimulator.Account.Domain.Enums;
 using TradingSimulator.Account.Domain.ValueObjects;
 using TradingSimulator.Account.Infrastructure.Messaging;
 using TradingSimulator.Account.Infrastructure.Serialization;
+using TradingSimulator.Account.Processors.OrderFunds;
 
 namespace TradingSimulator.Account.Tests;
 
@@ -48,7 +49,7 @@ public sealed class OrderFundsTests
     public async Task Sell_orders_are_discarded_without_response()
     {
         var store = new FakeStore();
-        await Processor(store).ProcessOrderSubmittedAsync(OrderSubmitted("Sell", "Limit", 10, 5m), Options, default);
+        await Processor(store).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Sell, OrderType.Limit, 10, 5m), default);
 
         Assert.Equal(1, store.Rejects);
         Assert.Null(store.LastFailure);
@@ -59,7 +60,7 @@ public sealed class OrderFundsTests
     public async Task Limit_buy_reserves_quantity_times_price()
     {
         var store = new FakeStore();
-        await Processor(store).ProcessOrderSubmittedAsync(OrderSubmitted("Buy", "Limit", 10, 5.5m), Options, default);
+        await Processor(store).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Limit, 10, 5.5m), default);
 
         Assert.Equal(55m, store.ReservedAmount);
     }
@@ -68,7 +69,7 @@ public sealed class OrderFundsTests
     public async Task Market_buy_uses_best_ask_with_margin()
     {
         var store = new FakeStore();
-        await Processor(store, 20m).ProcessOrderSubmittedAsync(OrderSubmitted("Buy", "Market", 2, null), Options, default);
+        await Processor(store, 20m).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Market, 2, null), default);
 
         Assert.Equal(42m, store.ReservedAmount);
     }
@@ -77,10 +78,9 @@ public sealed class OrderFundsTests
     public async Task Market_buy_without_price_fails_with_price_unavailable()
     {
         var store = new FakeStore();
-        await Processor(store, null).ProcessOrderSubmittedAsync(OrderSubmitted("Buy", "Market", 2, null), Options, default);
+        await Processor(store, null).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Market, 2, null), default);
 
-        var error = store.LastFailure!.Event.ErrorValue;
-        Assert.Equal(FundsReservationErrorKind.PriceUnavailable, error.Kind);
+        Assert.Equal(FundsReservationErrorKind.PriceUnavailable, store.LastFailure!.Kind);
         Assert.Equal(0, store.Reserves);
     }
 
@@ -88,20 +88,20 @@ public sealed class OrderFundsTests
     public async Task Insufficient_funds_produces_failure_response()
     {
         var store = new FakeStore { ReserveError = new ReservationExceedsAvailableBalance() };
-        await Processor(store).ProcessOrderSubmittedAsync(OrderSubmitted("Buy", "Limit", 10, 5m), Options, default);
+        await Processor(store).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Limit, 10, 5m), default);
 
-        Assert.Equal(FundsReservationErrorKind.InsufficientFunds, store.LastFailure!.Event.ErrorValue.Kind);
+        Assert.Equal(FundsReservationErrorKind.InsufficientFunds, store.LastFailure!.Kind);
     }
 
     [Fact]
     public async Task Fill_debits_and_cancel_releases()
     {
         var store = new FakeStore();
-        var orderId = Guid.CreateVersion7();
+        var orderId = OrderId.New();
         var processor = Processor(store);
 
-        await processor.ProcessExchangeEventAsync(Event("OrderPartiallyFilled", orderId, ",\"executedQuantity\":3,\"price\":2.5"), Options, default);
-        await processor.ProcessExchangeEventAsync(Event("OrderCancelled", orderId, ""), Options, default);
+        await processor.SettleFillAsync(Guid.CreateVersion7(), orderId, 3, 2.5m, false, default);
+        await processor.SettleClosureAsync(Guid.CreateVersion7(), orderId, default);
 
         Assert.Equal(7.5m, store.DebitedAmount);
         Assert.False(store.DebitFinal);
@@ -113,11 +113,12 @@ public sealed class OrderFundsTests
     {
         var store = new FakeStore { Outcome = OrderFundsOutcome.UnknownOrder };
         var processor = Processor(store);
-        var body = Event("OrderFilled", Guid.CreateVersion7(), ",\"executedQuantity\":1,\"executionPrice\":2");
+        var envelopeId = Guid.CreateVersion7();
+        var orderId = OrderId.New();
 
         for (var i = 1; i < OrderFundsProcessor.MaxFillAttempts; i++)
-            await Assert.ThrowsAsync<InvalidOperationException>(() => processor.ProcessExchangeEventAsync(body, Options, default));
-        await processor.ProcessExchangeEventAsync(body, Options, default);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => processor.SettleFillAsync(envelopeId, orderId, 1, 2m, true, default));
+        await processor.SettleFillAsync(envelopeId, orderId, 1, 2m, true, default);
 
         Assert.True(store.DebitFinal);
     }
@@ -139,13 +140,8 @@ public sealed class OrderFundsTests
     private static OrderFundsProcessor Processor(FakeStore store, decimal? ask = 1m) =>
         new(store, new FakeOfferBook(ask), NullLogger<OrderFundsProcessor>.Instance);
 
-    private static string OrderSubmitted(string side, string type, long quantity, decimal? price) =>
-        $$$"""
-        {"id":"{{{Guid.CreateVersion7()}}}","eventType":"OrderSubmitted","event":{"orderId":{"guid":"{{{Guid.CreateVersion7()}}}"},"accountId":{"guid":"{{{Guid.CreateVersion7()}}}"},"ticker":"PETR4","side":"{{{side}}}","type":"{{{type}}}","quantity":{{{quantity}}},"price":{{{(price is null ? "null" : price.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))}}}}}
-        """;
-
-    private static string Event(string type, Guid orderId, string extra) =>
-        $$$"""{"id":"{{{Guid.CreateVersion7()}}}","eventType":"{{{type}}}","event":{"orderId":"{{{orderId}}}"{{{extra}}}}}""";
+    private static OrderSubmission Submission(OrderSide side, OrderType type, long quantity, decimal? price) =>
+        new(OrderId.New(), Guid.CreateVersion7(), "PETR4", side, type, quantity, price);
 
     private sealed class FakeOfferBook(decimal? ask) : IOfferBookClient
     {
@@ -162,9 +158,9 @@ public sealed class OrderFundsTests
         public bool DebitFinal;
         public IAccountError? ReserveError;
         public OrderFundsOutcome Outcome = OrderFundsOutcome.Applied;
-        public FundsReservationResponse? LastFailure;
+        public FundsReservationFailure? LastFailure;
 
-        public Task<Result<OrderFundsOutcome, IAccountError>> ReserveAsync(Guid envelopeId, OrderId orderId, AccountId accountId, decimal amount, FundsReservationResponse success, CancellationToken cancellationToken)
+        public Task<Result<OrderFundsOutcome, IAccountError>> ReserveAsync(Guid envelopeId, OrderId orderId, AccountId accountId, decimal amount, CancellationToken cancellationToken)
         {
             if (ReserveError is not null)
                 return Task.FromResult(Result<OrderFundsOutcome, IAccountError>.Error(ReserveError));
@@ -173,7 +169,7 @@ public sealed class OrderFundsTests
             return Task.FromResult<Result<OrderFundsOutcome, IAccountError>>(OrderFundsOutcome.Applied);
         }
 
-        public Task<OrderFundsOutcome> RejectAsync(Guid envelopeId, OrderId orderId, string reason, FundsReservationResponse? failure, CancellationToken cancellationToken)
+        public Task<OrderFundsOutcome> RejectAsync(Guid envelopeId, OrderId orderId, string reason, FundsReservationFailure? failure, CancellationToken cancellationToken)
         {
             Rejects++;
             LastFailure = failure;

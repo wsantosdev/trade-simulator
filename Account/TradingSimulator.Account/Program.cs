@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
-using TradingSimulator.Account.Common;
+using TradingSimulator.Account.Features.Shared;
+using TradingSimulator.Account.Processors.OrderFunds;
 using TradingSimulator.Account.Domain.Entities;
 using TradingSimulator.Account.Features.Deposit;
 using TradingSimulator.Account.Features.GetAccount;
@@ -22,6 +23,11 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<ILogger<PostgresAccountStore>>());
 });
 builder.Services.AddSingleton<IAccountStore>(sp => sp.GetRequiredService<PostgresAccountStore>());
+builder.Services.AddSingleton<IDeposit, DepositHandler>();
+builder.Services.AddSingleton<IWithdrawFunds, WithdrawFundsHandler>();
+builder.Services.AddSingleton<IReserveFunds, ReserveFundsHandler>();
+builder.Services.AddSingleton<IGetAccount, GetAccountHandler>();
+builder.Services.AddSingleton<IOpenAccount, OpenAccountHandler>();
 builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresAccountStore>());
 builder.Services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
 builder.Services.AddHostedService<OutboxPublisherService>();

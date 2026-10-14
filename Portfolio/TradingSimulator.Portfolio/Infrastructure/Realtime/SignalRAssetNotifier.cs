@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using TradingSimulator.Portfolio.Common;
+using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 using TradingSimulator.Portfolio.Domain.ValueObjects;
 
 namespace TradingSimulator.Portfolio.Infrastructure.Realtime;

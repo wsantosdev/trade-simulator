@@ -1,11 +1,15 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Domain;
 using TradingSimulator.Exchange.Domain.Enums;
+using TradingSimulator.Exchange.Domain.Events;
 using TradingSimulator.Exchange.Domain.ValueObjects;
 using TradingSimulator.Exchange.Infrastructure.Messaging;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
+using TradingSimulator.Exchange.Processors.OfferBook;
+using TradingSimulator.Exchange.Processors.OrderCommands;
+using TradingSimulator.Exchange.Processors.Quotes;
+using TradingSimulator.Exchange.Simulation;
 
 namespace TradingSimulator.Exchange.Tests.OrderBook;
 
@@ -46,28 +50,16 @@ public sealed class OrderBookEngineTests
 
         public Task Cycle() => Engine.RunCycleAsync(Clock.GetUtcNow(), default);
 
-        public async Task<OfferBookSnapshot> Snapshot(Ticker ticker)
+        public async Task<BookSnapshot> Snapshot(Ticker ticker)
         {
             OfferBook.Snapshots.Clear();
             await Engine.PublishSnapshotAsync(ticker, default);
-            return OfferBook.Snapshots.Last().Event;
+            return OfferBook.Snapshots.Last();
         }
 
-        public IEnumerable<object> EventsOf(OrderId id) =>
-            Orders.Events.Select(e => e.Event).Where(e => IdOf(e) == id);
+        public IEnumerable<OrderEvent> EventsOf(OrderId id) =>
+            Orders.Events.Where(e => e.OrderId == id);
 
-        private static OrderId IdOf(object message) => message switch
-        {
-            OrderAckedMessage m => m.OrderId,
-            OrderRejectedMessage m => m.OrderId,
-            OrderPartiallyFilledMessage m => m.OrderId,
-            OrderFilledMessage m => m.OrderId,
-            OrderCancelledMessage m => m.OrderId,
-            OrderReplacedMessage m => m.OrderId,
-            OrderCancelRejectedMessage m => m.OrderId,
-            OrderReplaceRejectedMessage m => m.OrderId,
-            _ => default
-        };
     }
 
     [Fact]
@@ -78,15 +70,15 @@ public sealed class OrderBookEngineTests
         await h.Cycle();
         var asks = (await h.Snapshot(Petr)).Asks;
         var id = OrderId.New();
-        var quantity = asks[0].Quantity + 1;
+        var quantity = asks[0].Quantity.Value + 1;
 
-        await h.Send(new SubmitOrder(id, Petr, OrderSide.Buy, OrderType.Limit, Q(quantity), P(asks[0].Price + 1m)));
+        await h.Send(new SubmitOrder(id, Petr, OrderSide.Buy, OrderType.Limit, Q(quantity), P(asks[0].Price.Value + 1m)));
 
         var events = h.EventsOf(id).ToList();
-        Assert.IsType<OrderAckedMessage>(events[0]);
-        var partial = Assert.IsType<OrderPartiallyFilledMessage>(events[1]);
-        Assert.Equal((asks[0].Quantity, 1L, asks[0].Price), (partial.ExecutedQuantity, partial.RemainingQuantity, partial.ExecutionPrice));
-        Assert.Equal(asks[1].Price, Assert.IsType<OrderFilledMessage>(events[2]).ExecutionPrice);
+        Assert.IsType<OrderAcked>(events[0]);
+        var partial = Assert.IsType<OrderPartiallyFilled>(events[1]);
+        Assert.Equal((asks[0].Quantity.Value, 1L, asks[0].Price), (partial.Executed.Value, partial.Remaining.Value, partial.ExecutionPrice));
+        Assert.Equal(asks[1].Price, Assert.IsType<OrderFilled>(events[2]).ExecutionPrice);
         Assert.Equal(3, events.Count);
     }
 
@@ -101,11 +93,11 @@ public sealed class OrderBookEngineTests
         await h.Send(new SubmitOrder(id, Petr, OrderSide.Sell, OrderType.Market, Q(10_000_000), null));
 
         var events = h.EventsOf(id).ToList();
-        Assert.IsType<OrderAckedMessage>(events[0]);
-        Assert.All(events.Skip(1).SkipLast(1), e => Assert.IsType<OrderPartiallyFilledMessage>(e));
-        var cancelled = Assert.IsType<OrderCancelledMessage>(events[^1]);
-        Assert.Equal(10_000_000, cancelled.ExecutedQuantity + cancelled.RemainingQuantity);
-        Assert.True(cancelled.ExecutedQuantity > 0);
+        Assert.IsType<OrderAcked>(events[0]);
+        Assert.All(events.Skip(1).SkipLast(1), e => Assert.IsType<OrderPartiallyFilled>(e));
+        var cancelled = Assert.IsType<OrderCancelled>(events[^1]);
+        Assert.Equal(10_000_000, cancelled.Executed.Value + cancelled.Remaining.Value);
+        Assert.True(cancelled.Executed.Value > 0);
     }
 
     [Fact]
@@ -118,20 +110,20 @@ public sealed class OrderBookEngineTests
         await h.Send(new SubmitOrder(id, Petr, OrderSide.Buy, OrderType.Limit, Q(300), P(1m)));
         await h.Send(new ReplaceOrder(id, P(2m)));
         await h.Send(new ReplaceOrder(id, P(1000m)));
-        Assert.IsType<OrderReplacedMessage>(h.EventsOf(id).ElementAt(2));
-        Assert.Contains(h.EventsOf(id).Skip(3), e => e is OrderFilledMessage or OrderPartiallyFilledMessage);
+        Assert.IsType<OrderReplaced>(h.EventsOf(id).ElementAt(2));
+        Assert.Contains(h.EventsOf(id).Skip(3), e => e is OrderFilled or OrderPartiallyFilled);
 
         var other = OrderId.New();
         await h.Send(new SubmitOrder(other, Petr, OrderSide.Buy, OrderType.Limit, Q(300), P(1m)));
         await h.Send(new CancelOrder(other));
         await h.Send(new CancelOrder(other));
         var events = h.EventsOf(other).ToList();
-        var cancelled = Assert.IsType<OrderCancelledMessage>(events[1]);
-        Assert.Equal((0L, 300L), (cancelled.ExecutedQuantity, cancelled.RemainingQuantity));
-        Assert.IsType<OrderCancelRejectedMessage>(events[2]);
+        var cancelled = Assert.IsType<OrderCancelled>(events[1]);
+        Assert.Equal((0L, 300L), (cancelled.Executed.Value, cancelled.Remaining.Value));
+        Assert.IsType<OrderCancelRejected>(events[2]);
 
         await h.Send(new ReplaceOrder(OrderId.New(), P(1m)));
-        Assert.IsType<OrderReplaceRejectedMessage>(h.Orders.Events.Last().Event);
+        Assert.IsType<OrderReplaceRejected>(h.Orders.Events.Last());
     }
 
     [Fact]
@@ -140,22 +132,22 @@ public sealed class OrderBookEngineTests
         var closed = new Harness(Day.AddHours(19));
         var a = OrderId.New();
         await closed.Send(new SubmitOrder(a, Petr, OrderSide.Buy, OrderType.Limit, Q(100), P(30m)));
-        Assert.IsType<OrderRejectedMessage>(Assert.Single(closed.EventsOf(a)));
+        Assert.IsType<OrderRejected>(Assert.Single(closed.EventsOf(a)));
 
         var open = new Harness(OpenTime);
         var b = OrderId.New();
         await open.Send(new SubmitOrder(b, Vale, OrderSide.Buy, OrderType.Limit, Q(100), P(30m)));
-        Assert.IsType<OrderRejectedMessage>(Assert.Single(open.EventsOf(b)));
+        Assert.IsType<OrderRejected>(Assert.Single(open.EventsOf(b)));
 
         var c = OrderId.New();
         await open.Send(new RejectOrder(c));
         await open.Send(new SubmitOrder(OrderId.New(), Petr, OrderSide.Buy, OrderType.Limit, Q(100), null));
-        Assert.IsType<OrderRejectedMessage>(Assert.Single(open.EventsOf(c)));
-        Assert.IsType<OrderRejectedMessage>(open.Orders.Events.Last().Event);
+        Assert.IsType<OrderRejected>(Assert.Single(open.EventsOf(c)));
+        Assert.IsType<OrderRejected>(open.Orders.Events.Last());
 
         var off = OrderId.New();
         await open.Send(new SubmitOrder(off, Petr, OrderSide.Buy, OrderType.Limit, Q(100), P(30.005m)));
-        Assert.IsType<OrderRejectedMessage>(Assert.Single(open.EventsOf(off)));
+        Assert.IsType<OrderRejected>(Assert.Single(open.EventsOf(off)));
     }
 
     [Fact]
@@ -167,7 +159,7 @@ public sealed class OrderBookEngineTests
         await h.Send(command);
         await h.Send(command);
         await h.Send(new RejectOrder(id));
-        Assert.IsType<OrderAckedMessage>(Assert.Single(h.EventsOf(id)));
+        Assert.IsType<OrderAcked>(Assert.Single(h.EventsOf(id)));
     }
 
     [Fact]
@@ -179,7 +171,7 @@ public sealed class OrderBookEngineTests
         var snapshot = await h.Snapshot(Petr);
         Assert.Equal(10, snapshot.Bids.Count);
         Assert.Equal(10, snapshot.Asks.Count);
-        Assert.True(snapshot.Asks[0].Price > snapshot.Bids[0].Price);
+        Assert.True(snapshot.Asks[0].Price.Value > snapshot.Bids[0].Price.Value);
         Assert.All(snapshot.Bids.Concat(snapshot.Asks), level => Assert.InRange(level.Orders, 1, 3));
 
         await h.Send(new SubmitOrder(OrderId.New(), Petr, OrderSide.Buy, OrderType.Market, Q(10_000_000), null));
@@ -209,8 +201,8 @@ public sealed class OrderBookEngineTests
         }
 
         Assert.Equal(3, h.OfferBook.Deltas.Count);
-        Assert.All(h.OfferBook.Deltas, d => Assert.Empty(d.Event.Changes));
-        Assert.Equal(h.OfferBook.Deltas.Select(d => d.Event.Sequence - 1), h.OfferBook.Deltas.Select(d => d.Event.PreviousSequence));
+        Assert.All(h.OfferBook.Deltas, d => Assert.Empty(d.Changes));
+        Assert.Equal(h.OfferBook.Deltas.Select(d => d.Sequence - 1), h.OfferBook.Deltas.Select(d => d.PreviousSequence));
         Assert.Equal(frozen.Bids, (await h.Snapshot(Petr)).Bids);
         Assert.Equal(frozen.Asks, (await h.Snapshot(Petr)).Asks);
     }
@@ -225,14 +217,14 @@ public sealed class OrderBookEngineTests
         Assert.Empty(h.OfferBook.Deltas);
 
         await h.Send(new SubmitOrder(OrderId.New(), Petr, OrderSide.Buy, OrderType.Limit, Q(300), P(1000m)));
-        var delta = Assert.Single(h.OfferBook.Deltas).Event;
+        var delta = Assert.Single(h.OfferBook.Deltas);
         Assert.Equal((2L, 1L), (delta.Sequence, delta.PreviousSequence));
         Assert.NotEmpty(delta.Changes);
 
         h.Clock.Advance(TimeSpan.FromSeconds(1));
         h.Interest.Renew([Petr]);
         await h.Cycle();
-        var all = h.OfferBook.Deltas.Select(d => d.Event).ToList();
+        var all = h.OfferBook.Deltas.ToList();
         Assert.All(all.Zip(all.Skip(1)), pair => Assert.Equal(pair.First.Sequence, pair.Second.PreviousSequence));
     }
 
@@ -251,8 +243,8 @@ public sealed class OrderBookEngineTests
         var h = new Harness(OpenTime);
         var id = OrderId.New();
         await h.Send(new SubmitOrder(id, Petr, OrderSide.Sell, OrderType.Limit, Q(100), P(1m)));
-        Assert.IsType<OrderAckedMessage>(h.EventsOf(id).First());
-        Assert.Contains(h.EventsOf(id), e => e is OrderFilledMessage);
+        Assert.IsType<OrderAcked>(h.EventsOf(id).First());
+        Assert.Contains(h.EventsOf(id), e => e is OrderFilled);
     }
 
     [Fact]
@@ -281,40 +273,41 @@ public sealed class OrderBookEngineTests
         Assert.All(book.RestingOrders(), o => Assert.Equal(OrderOrigin.Simulated, o.Origin));
     }
 
+    private static BookLevel Level(decimal price, long quantity, int orders) =>
+        new(Price.TryCreate(price).ResultValue, Quantity.TryCreate(quantity).ResultValue, orders);
+
     [Fact]
     public void Window_diff_reports_changed_and_removed_levels()
     {
-        var previous = new OfferBookWindow(
-            [new OfferBookLevel(10m, 100, 1), new OfferBookLevel(9.99m, 100, 1)], [new OfferBookLevel(10.01m, 100, 1)]);
-        var current = new OfferBookWindow(
-            [new OfferBookLevel(10m, 150, 2)], [new OfferBookLevel(10.01m, 100, 1), new OfferBookLevel(10.02m, 50, 1)]);
+        var previous = new OfferBookWindow([Level(10m, 100, 1), Level(9.99m, 100, 1)], [Level(10.01m, 100, 1)]);
+        var current = new OfferBookWindow([Level(10m, 150, 2)], [Level(10.01m, 100, 1), Level(10.02m, 50, 1)]);
 
         var changes = OfferBookWindow.Diff(previous, current);
 
         Assert.Equal(3, changes.Count);
-        Assert.Contains(new OfferBookChange(OfferBookSide.Bid, 10m, 150, 2), changes);
-        Assert.Contains(new OfferBookChange(OfferBookSide.Bid, 9.99m, 0, 0), changes);
-        Assert.Contains(new OfferBookChange(OfferBookSide.Ask, 10.02m, 50, 1), changes);
+        Assert.Contains(new BookChange(OrderSide.Buy, Level(10m, 150, 2).Price, Level(10m, 150, 2).Quantity, 2), changes);
+        Assert.Contains(new BookChange(OrderSide.Buy, Level(9.99m, 1, 1).Price, Quantity.Zero, 0), changes);
+        Assert.Contains(new BookChange(OrderSide.Sell, Level(10.02m, 50, 1).Price, Level(10.02m, 50, 1).Quantity, 1), changes);
         Assert.Empty(OfferBookWindow.Diff(current, current));
     }
 
     [Fact]
-    public void Command_processor_parses_orders_envelopes()
+    public void Command_parser_parses_orders_envelopes()
     {
         var id = Guid.CreateVersion7();
         var body = $$$"""{"id":"{{{Guid.NewGuid()}}}","eventType":"OrderDispatched","event":{"orderId":{"guid":"{{{id}}}"},"ticker":"PETR4","side":"Buy","type":"Limit","quantity":100,"price":10.5}}""";
-        var parsed = OrderCommandProcessor.Parse(body, MessageJson.Options);
+        var parsed = OrderCommandParser.Parse(body, MessageJson.Options);
         var submit = Assert.IsType<SubmitOrder>(parsed.ResultValue);
         Assert.Equal((id, 100L, 10.5m), (submit.OrderId.Guid, submit.Quantity.Value, submit.Price!.Value.Value));
 
         var cancel = $$$"""{"id":"{{{Guid.NewGuid()}}}","eventType":"OrderCancelRequested","event":{"orderId":"{{{id}}}"}}""";
-        Assert.IsType<CancelOrder>(OrderCommandProcessor.Parse(cancel, MessageJson.Options).ResultValue);
+        Assert.IsType<CancelOrder>(OrderCommandParser.Parse(cancel, MessageJson.Options).ResultValue);
 
         var invalidQuantity = body.Replace("\"quantity\":100", "\"quantity\":0");
-        Assert.IsType<RejectOrder>(OrderCommandProcessor.Parse(invalidQuantity, MessageJson.Options).ResultValue);
+        Assert.IsType<RejectOrder>(OrderCommandParser.Parse(invalidQuantity, MessageJson.Options).ResultValue);
 
-        Assert.True(OrderCommandProcessor.Parse("not json", MessageJson.Options).IsError);
-        Assert.True(OrderCommandProcessor.Parse(body.Replace(id.ToString(), Guid.NewGuid().ToString()), MessageJson.Options).IsError);
+        Assert.True(OrderCommandParser.Parse("not json", MessageJson.Options).IsError);
+        Assert.True(OrderCommandParser.Parse(body.Replace(id.ToString(), Guid.NewGuid().ToString()), MessageJson.Options).IsError);
     }
 
     private sealed class Clock(DateTimeOffset now) : TimeProvider
@@ -333,34 +326,34 @@ public sealed class OrderBookEngineTests
 
     private sealed class FakeQuotePublisher : IQuotePublisher
     {
-        public Task PublishAsync(EventEnvelope<Quote> envelope, CancellationToken ct) => Task.CompletedTask;
+        public Task PublishAsync(Quote quote, CancellationToken ct) => Task.CompletedTask;
     }
 
     private sealed class FakeOrderEvents : IOrderEventPublisher
     {
-        public List<EventEnvelope<object>> Events { get; } = [];
+        public List<OrderEvent> Events { get; } = [];
 
-        public Task PublishAsync(EventEnvelope<object> envelope, CancellationToken ct)
+        public Task PublishAsync(Guid eventId, OrderEvent orderEvent, CancellationToken ct)
         {
-            Events.Add(envelope);
+            Events.Add(orderEvent);
             return Task.CompletedTask;
         }
     }
 
     private sealed class FakeOfferBook : IOfferBookPublisher
     {
-        public List<EventEnvelope<OfferBookSnapshot>> Snapshots { get; } = [];
-        public List<EventEnvelope<OfferBookDelta>> Deltas { get; } = [];
+        public List<BookSnapshot> Snapshots { get; } = [];
+        public List<BookDelta> Deltas { get; } = [];
 
-        public Task PublishSnapshotAsync(EventEnvelope<OfferBookSnapshot> envelope, CancellationToken ct)
+        public Task PublishSnapshotAsync(BookSnapshot snapshot, CancellationToken ct)
         {
-            Snapshots.Add(envelope);
+            Snapshots.Add(snapshot);
             return Task.CompletedTask;
         }
 
-        public Task PublishDeltaAsync(EventEnvelope<OfferBookDelta> envelope, CancellationToken ct)
+        public Task PublishDeltaAsync(BookDelta delta, CancellationToken ct)
         {
-            Deltas.Add(envelope);
+            Deltas.Add(delta);
             return Task.CompletedTask;
         }
     }

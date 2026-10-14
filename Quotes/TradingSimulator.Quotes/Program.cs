@@ -1,6 +1,8 @@
 using TradingSimulator.Quotes.Common;
-using TradingSimulator.Quotes.Features.QueryQuotes;
+using TradingSimulator.Quotes.Features.GetLatestQuote;
 using TradingSimulator.Quotes.Infrastructure.Messaging;
+using TradingSimulator.Quotes.Processors.QuoteInterest;
+using TradingSimulator.Quotes.Processors.QuoteUpdates;
 using TradingSimulator.Quotes.Infrastructure.Realtime;
 using TradingSimulator.Quotes.Infrastructure.Serialization;
 
@@ -21,6 +23,7 @@ builder.Services.AddSignalR().AddJsonProtocol(options =>
 builder.Services.AddSingleton<LatestQuotes>();
 builder.Services.AddSingleton<QuoteSubscriptions>();
 builder.Services.AddSingleton<QuoteProcessor>();
+builder.Services.AddSingleton<IGetLatestQuote, GetLatestQuoteHandler>();
 builder.Services.AddSingleton<QuoteInterestHeartbeat>();
 builder.Services.AddSingleton<IQuoteNotifier, SignalRQuoteNotifier>();
 builder.Services.AddSingleton<IQuoteInterestPublisher, RabbitMqQuoteInterestPublisher>();
@@ -42,7 +45,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapQuoteQueryEndpoints();
+app.MapGetLatestQuoteEndpoint();
 app.MapHub<QuotesHub>(QuotesHub.Route);
 app.Run();
 

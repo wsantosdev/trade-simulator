@@ -1,3 +1,4 @@
+using TradingSimulator.Quotes.Processors.QuoteUpdates;
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;

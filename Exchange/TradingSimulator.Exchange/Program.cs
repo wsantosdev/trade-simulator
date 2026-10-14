@@ -1,13 +1,16 @@
 using Npgsql;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Features.ImportInstruments;
 using TradingSimulator.Exchange.Features.ImportQuotes;
-using TradingSimulator.Exchange.Features.QueryInstruments;
+using TradingSimulator.Exchange.Features.GetInstrument;
+using TradingSimulator.Exchange.Features.SearchInstruments;
 using TradingSimulator.Exchange.Features.QueryQuotes;
 using TradingSimulator.Exchange.Infrastructure.Database;
 using TradingSimulator.Exchange.Infrastructure.Messaging;
-using TradingSimulator.Exchange.Infrastructure.Simulation;
 using TradingSimulator.Exchange.Infrastructure.Sources;
+using TradingSimulator.Exchange.Processors.OfferBook;
+using TradingSimulator.Exchange.Processors.OrderCommands;
+using TradingSimulator.Exchange.Processors.Quotes;
+using TradingSimulator.Exchange.Simulation;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Exchange");
@@ -18,17 +21,21 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString ?? string.Empty));
 builder.Services.AddSingleton<PostgresInstrumentStore>();
 builder.Services.AddSingleton<IInstrumentStore>(sp => sp.GetRequiredService<PostgresInstrumentStore>());
-builder.Services.AddSingleton<IInstrumentQueries, PostgresInstrumentQueries>();
+builder.Services.AddSingleton<PostgresInstrumentQueries>();
+builder.Services.AddSingleton<IInstrumentSearch>(sp => sp.GetRequiredService<PostgresInstrumentQueries>());
+builder.Services.AddSingleton<IInstrumentLookup>(sp => sp.GetRequiredService<PostgresInstrumentQueries>());
+builder.Services.AddSingleton<ISearchInstruments, SearchInstrumentsHandler>();
+builder.Services.AddSingleton<IGetInstrument, GetInstrumentHandler>();
 builder.Services.AddSingleton<IInstrumentSource, BvbgInstrumentSource>();
 builder.Services.AddSingleton<ImportInstrumentsHandler>();
 builder.Services.AddSingleton<IQuoteStore, PostgresQuoteStore>();
 builder.Services.AddSingleton<IQuoteQueries, PostgresQuoteQueries>();
+builder.Services.AddSingleton<IQueryQuotes, QueryQuotesHandler>();
 builder.Services.AddSingleton<IQuoteSource, CotahistQuoteSource>();
 builder.Services.AddSingleton<ImportQuotesHandler>();
 builder.Services.AddSingleton<IQuoteSimulationSource, PostgresQuoteSimulationSource>();
 builder.Services.AddSingleton<IQuotePublisher, RabbitMqQuotePublisher>();
 builder.Services.AddSingleton<QuoteInterestRegistry>();
-builder.Services.AddSingleton<QuoteInterestProcessor>();
 builder.Services.AddSingleton(sp => new QuoteSimulator(
     sp.GetRequiredService<IQuoteSimulationSource>(), sp.GetRequiredService<IQuotePublisher>(),
     sp.GetRequiredService<QuoteInterestRegistry>(), Random.Shared, sp.GetRequiredService<ILogger<QuoteSimulator>>()));
@@ -42,7 +49,6 @@ builder.Services.AddSingleton(sp => new OrderBookEngine(
     sp.GetRequiredService<SimulatedLiquidity>(), sp.GetRequiredService<TimeProvider>(),
     builder.Configuration.GetValue<TimeSpan>("Simulation:SessionClockOffset"),
     sp.GetRequiredService<ILogger<OrderBookEngine>>()));
-builder.Services.AddSingleton<OrderCommandProcessor>();
 builder.Services.AddSingleton<OfferBookInterestProcessor>();
 builder.Services.AddHostedService<RabbitMqQuoteInterestConsumer>();
 builder.Services.AddHostedService<RabbitMqOrderCommandConsumer>();
@@ -98,8 +104,9 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapInstrumentQueryEndpoints();
-app.MapQuoteQueryEndpoints();
+app.MapSearchInstrumentsEndpoint();
+app.MapGetInstrumentEndpoint();
+app.MapQueryQuotesEndpoint();
 app.Run();
 return 0;
 

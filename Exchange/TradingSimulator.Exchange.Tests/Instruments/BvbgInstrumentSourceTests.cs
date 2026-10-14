@@ -1,4 +1,4 @@
-using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Features.ImportInstruments;
 using TradingSimulator.Exchange.Infrastructure.Sources;
 
 namespace TradingSimulator.Exchange.Tests.Instruments;

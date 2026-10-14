@@ -1,13 +1,12 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using TradingSimulator.Orders.Infrastructure.Serialization;
 
 namespace TradingSimulator.Orders.Infrastructure.Messaging;
 
 public sealed class RabbitMqExchangeEventConsumer(
     IConfiguration configuration,
-    ExchangeEventProcessor processor,
+    ExchangeEventMessageHandler handler,
     ILogger<RabbitMqExchangeEventConsumer> logger) : BackgroundService
 {
     public const string ExchangeName = "trading-simulator.exchange.order.events";
@@ -59,7 +58,7 @@ public sealed class RabbitMqExchangeEventConsumer(
             try
             {
                 var body = Encoding.UTF8.GetString(delivery.Body.Span);
-                await processor.ProcessAsync(body, OrderJson.Options, stoppingToken);
+                await handler.HandleAsync(body, stoppingToken);
                 await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

@@ -1,3 +1,5 @@
+using TradingSimulator.Quotes.Processors.QuoteUpdates;
+using TradingSimulator.Quotes.Processors.QuoteInterest;
 using TradingSimulator.Quotes.Common;
 using TradingSimulator.Quotes.Domain.ValueObjects;
 using TradingSimulator.Quotes.Infrastructure.Messaging;

@@ -1,5 +1,5 @@
-using TradingSimulator.Account.Common;
-using TradingSimulator.Account.Infrastructure.Serialization;
+using TradingSimulator.Account.Domain.ValueObjects;
+using TradingSimulator.Account.Processors.OrderFunds;
 
 namespace TradingSimulator.Account.Infrastructure.Messaging;
 
@@ -22,6 +22,54 @@ public sealed class ExchangeEventConsumer(
         FundsEventTypes.OrderRejected
     ];
 
-    protected override Task HandleAsync(string body, CancellationToken cancellationToken) =>
-        processor.ProcessExchangeEventAsync(body, AccountJson.Options, cancellationToken);
+    protected override async Task HandleAsync(string body, CancellationToken cancellationToken)
+    {
+        var envelope = EnvelopeReader.Read(body, logger);
+        if (envelope is null)
+            return;
+
+        switch (envelope.EventType)
+        {
+            case FundsEventTypes.OrderPartiallyFilled:
+            case FundsEventTypes.OrderFilled:
+                await HandleFillAsync(envelope, cancellationToken);
+                break;
+            case FundsEventTypes.OrderCancelled:
+            case FundsEventTypes.OrderRejected:
+                await HandleClosureAsync(envelope, cancellationToken);
+                break;
+            default:
+                logger.LogDebug("Discarded exchange event {EventType}.", envelope.EventType);
+                break;
+        }
+    }
+
+    private async Task HandleFillAsync(EventEnvelope<System.Text.Json.JsonElement> envelope, CancellationToken cancellationToken)
+    {
+        var message = EnvelopeReader.ReadPayload<OrderFillMessage>(envelope, logger);
+        var orderId = message is null ? default : OrderId.TryCreate(message.OrderId);
+        var price = message?.Price ?? message?.ExecutionPrice;
+        if (message is null || orderId.IsError || price is null)
+        {
+            logger.LogWarning("{EventType} {EnvelopeId} is invalid; discarded.", envelope.EventType, envelope.Id);
+            return;
+        }
+
+        await processor.SettleFillAsync(
+            envelope.Id, orderId.ResultValue, message.ExecutedQuantity, price.Value,
+            envelope.EventType == FundsEventTypes.OrderFilled, cancellationToken);
+    }
+
+    private async Task HandleClosureAsync(EventEnvelope<System.Text.Json.JsonElement> envelope, CancellationToken cancellationToken)
+    {
+        var message = EnvelopeReader.ReadPayload<OrderClosureMessage>(envelope, logger);
+        var orderId = message is null ? default : OrderId.TryCreate(message.OrderId);
+        if (message is null || orderId.IsError)
+        {
+            logger.LogWarning("{EventType} {EnvelopeId} is invalid; discarded.", envelope.EventType, envelope.Id);
+            return;
+        }
+
+        await processor.SettleClosureAsync(envelope.Id, orderId.ResultValue, cancellationToken);
+    }
 }

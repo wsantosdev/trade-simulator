@@ -10,6 +10,7 @@ using TradingSimulator.Portfolio.Domain.Entities;
 using TradingSimulator.Portfolio.Domain.Events;
 using TradingSimulator.Portfolio.Domain.ValueObjects;
 using TradingSimulator.Portfolio.Infrastructure.Messaging;
+using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 using TradingSimulator.Portfolio.Infrastructure.Serialization;
 
 namespace TradingSimulator.Portfolio.Infrastructure.Database;
@@ -49,7 +50,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         return await LoadAsync(assetId, cancellationToken);
     }
 
-    public async Task<Result<Asset, IPortfolioError>> CreateAsync(Asset asset, PortfolioResponse response, CancellationToken cancellationToken)
+    public async Task<Result<Asset, IPortfolioError>> CreateAsync(Asset asset, PortfolioCommandResult result, CancellationToken cancellationToken)
     {
         try
         {
@@ -68,7 +69,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
             }
 
             await ProjectReadModelAsync(asset, connection, transaction, cancellationToken);
-            await InsertOutboxAsync(response, connection, transaction, cancellationToken);
+            await InsertOutboxAsync(result, connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         catch (PostgresException exception) when (exception.ConstraintName == EnvelopeConstraint)
@@ -84,20 +85,20 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         return asset;
     }
 
-    public async Task<Result<Asset, IPortfolioError>> AppendAsync(Asset asset, PortfolioResponse response, CancellationToken cancellationToken)
+    public async Task<Result<Asset, IPortfolioError>> AppendAsync(Asset asset, PortfolioCommandResult result, CancellationToken cancellationToken)
     {
         if (asset.UncommittedEvents.Count == 0)
             throw new InvalidOperationException("There are no uncommitted events to append.");
 
         var saved = await PersistAsync(
             asset,
-            (connection, transaction, token) => InsertOutboxAsync(response, connection, transaction, token),
+            (connection, transaction, token) => InsertOutboxAsync(result, connection, transaction, token),
             cancellationToken);
         return saved.IsError ? Result<Asset, IPortfolioError>.Error(saved.ErrorValue) : asset;
     }
 
     public async Task<Result<Asset, IPortfolioError>> ReserveAsync(
-        Guid envelopeId, Asset asset, OrderReservation reservation, AssetReservationResponse response, CancellationToken cancellationToken)
+        Guid envelopeId, Asset asset, OrderReservation reservation, AssetsBlocked blocked, CancellationToken cancellationToken)
     {
         if (asset.UncommittedEvents.Count == 0)
             throw new InvalidOperationException("There are no uncommitted events to append.");
@@ -120,20 +121,20 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
                     await command.ExecuteNonQueryAsync(token);
                 }
 
-                await InsertReservationOutboxAsync(AssetReservationEvents.BlockedRoutingKey, envelopeId, response, connection, transaction, token);
+                await InsertReservationOutboxAsync(AssetReservationEvents.BlockedRoutingKey, envelopeId, ReservationResponse(Result<AssetsBlocked, AssetBlockError>.Ok(blocked)), connection, transaction, token);
                 return true;
             },
             cancellationToken);
         return saved.IsError ? Result<Asset, IPortfolioError>.Error(saved.ErrorValue) : asset;
     }
 
-    public async Task<bool> RejectReservationAsync(Guid envelopeId, AssetReservationResponse failure, CancellationToken cancellationToken)
+    public async Task<bool> RejectReservationAsync(Guid envelopeId, AssetBlockError error, CancellationToken cancellationToken)
     {
         try
         {
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            await InsertReservationOutboxAsync(AssetReservationEvents.FailedRoutingKey, envelopeId, failure, connection, transaction, cancellationToken);
+            await InsertReservationOutboxAsync(AssetReservationEvents.FailedRoutingKey, envelopeId, ReservationResponse(Result<AssetsBlocked, AssetBlockError>.Error(error)), connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return true;
         }
@@ -398,6 +399,9 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static AssetReservationResponse ReservationResponse(Result<AssetsBlocked, AssetBlockError> outcome) =>
+        new(Guid.CreateVersion7(), AssetReservationEvents.ResultEventType, outcome);
+
     private static async Task InsertReservationOutboxAsync(
         string routingKey, Guid envelopeId, AssetReservationResponse response,
         NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
@@ -418,15 +422,18 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
     }
 
     private static async Task<bool> InsertOutboxAsync(
-        PortfolioResponse response, NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+        PortfolioCommandResult result, NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
     {
+        var response = new PortfolioResponse(
+            Guid.CreateVersion7(), PortfolioEventTypes.CommandResult,
+            Result<PortfolioCommandResult, PortfolioCommandError>.Ok(result));
         const string sql = """
             INSERT INTO portfolio_outbox (routing_key, payload, envelope_id)
             VALUES (@routingKey, @payload, @envelopeId);
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("routingKey", SucceededRoutingKey);
-        command.Parameters.AddWithValue("envelopeId", response.Event.ResultValue.EnvelopeId);
+        command.Parameters.AddWithValue("envelopeId", result.EnvelopeId);
         command.Parameters.Add(new NpgsqlParameter("payload", NpgsqlDbType.Jsonb)
         {
             Value = JsonSerializer.Serialize(response, PortfolioJson.Options)

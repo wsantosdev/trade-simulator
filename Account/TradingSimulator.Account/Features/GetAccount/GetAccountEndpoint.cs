@@ -1,5 +1,3 @@
-using TradingSimulator.Account.Common;
-using TradingSimulator.Account.Domain.ValueObjects;
 using TradingSimulator.Account.Infrastructure.Http;
 
 namespace TradingSimulator.Account.Features.GetAccount;
@@ -10,14 +8,10 @@ public static class GetAccountEndpoint
     {
         endpoints.MapGet("/api/accounts/{id:guid}", async (
             Guid id,
-            IAccountStore store,
+            IGetAccount getAccount,
             CancellationToken cancellationToken) =>
         {
-            var accountId = AccountId.TryCreate(id);
-            if (accountId.IsError)
-                return accountId.ErrorValue.ToHttpResult();
-
-            var result = await store.GetAsync(accountId.ResultValue, cancellationToken);
+            var result = await getAccount.ExecuteAsync(id, cancellationToken);
             return result.IsError
                 ? result.ErrorValue.ToHttpResult()
                 : Results.Ok(AccountResponse.From(result.ResultValue));

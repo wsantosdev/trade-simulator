@@ -1,11 +1,13 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
-using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Domain;
 using TradingSimulator.Exchange.Domain.Entities;
 using TradingSimulator.Exchange.Domain.Enums;
 using TradingSimulator.Exchange.Domain.ValueObjects;
+using TradingSimulator.Exchange.Infrastructure.Messaging;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
+using TradingSimulator.Exchange.Processors.Quotes;
+using TradingSimulator.Exchange.Simulation;
 
 namespace TradingSimulator.Exchange.Tests.Simulation;
 
@@ -90,7 +92,7 @@ public sealed class SimulationTests
 
         registry.Renew([Petr]);
         await simulator.RunCycleAsync(Day.AddHours(11), default);
-        Assert.Equal("PETR4", Assert.Single(publisher.Published).Event.Ticker);
+        Assert.Equal("PETR4", Assert.Single(publisher.Published).Ticker);
     }
 
     [Fact]
@@ -105,17 +107,14 @@ public sealed class SimulationTests
     }
 
     [Fact]
-    public void Interest_processor_accepts_valid_and_rejects_malformed()
+    public void Interest_parser_accepts_valid_and_rejects_malformed()
     {
-        var registry = new QuoteInterestRegistry(TimeProvider.System);
-        var processor = new QuoteInterestProcessor(registry);
         var body = System.Text.Json.JsonSerializer.Serialize(
             EventEnvelope.Of(new QuoteInterestRenewed(["PETR4", "??"])), MessageJson.Options);
 
-        Assert.Equal(1, processor.Process(body, MessageJson.Options).ResultValue);
-        Assert.Single(registry.ActiveTickers());
-        Assert.True(processor.Process("{not json", MessageJson.Options).IsError);
-        Assert.True(processor.Process("{}", MessageJson.Options).IsError);
+        Assert.Single(QuoteInterestParser.Parse(body, MessageJson.Options).ResultValue);
+        Assert.True(QuoteInterestParser.Parse("{not json", MessageJson.Options).IsError);
+        Assert.True(QuoteInterestParser.Parse("{}", MessageJson.Options).IsError);
     }
 
     private sealed class FakeSource(SimulationParameters parameters) : IQuoteSimulationSource
@@ -127,11 +126,11 @@ public sealed class SimulationTests
 
     private sealed class FakePublisher : IQuotePublisher
     {
-        public List<EventEnvelope<Quote>> Published { get; } = [];
+        public List<Quote> Published { get; } = [];
 
-        public Task PublishAsync(EventEnvelope<Quote> envelope, CancellationToken ct)
+        public Task PublishAsync(Quote quote, CancellationToken ct)
         {
-            Published.Add(envelope);
+            Published.Add(quote);
             return Task.CompletedTask;
         }
     }

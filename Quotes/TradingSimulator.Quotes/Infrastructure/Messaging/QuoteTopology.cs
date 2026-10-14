@@ -1,3 +1,4 @@
+using TradingSimulator.Quotes.Processors.QuoteInterest;
 using TradingSimulator.Quotes.Common;
 
 namespace TradingSimulator.Quotes.Infrastructure.Messaging;
