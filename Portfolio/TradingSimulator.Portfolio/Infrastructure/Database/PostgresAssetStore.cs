@@ -1,3 +1,4 @@
+using TradingSimulator.Commons.Telemetry;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -16,7 +17,7 @@ using TradingSimulator.Portfolio.Infrastructure.Serialization;
 namespace TradingSimulator.Portfolio.Infrastructure.Database;
 
 public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<PostgresAssetStore> logger)
-    : IAssetStore, IOutbox
+    : IAssetStore, IOutbox, IOutboxBacklogReader
 {
     public const int SnapshotInterval = 100;
     private const string EnvelopeConstraint = "ux_portfolio_outbox_envelope";
@@ -238,7 +239,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
     public async Task<IReadOnlyList<PendingResponse>> ReadPendingAsync(int limit, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT position, routing_key, payload::text, exchange
+            SELECT position, routing_key, payload::text, exchange, traceparent
             FROM portfolio_outbox
             WHERE published_at IS NULL
             ORDER BY position
@@ -249,8 +250,20 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var pending = new List<PendingResponse>();
         while (await reader.ReadAsync(cancellationToken))
-            pending.Add(new PendingResponse(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3)));
+            pending.Add(new PendingResponse(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4)));
         return pending;
+    }
+
+    public async Task<IReadOnlyList<OutboxBacklog>> ReadOutboxBacklogAsync(CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT COUNT(*), COALESCE(EXTRACT(EPOCH FROM now() - MIN(created_at)), 0)
+            FROM portfolio_outbox WHERE published_at IS NULL;
+            """;
+        await using var command = dataSource.CreateCommand(sql);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        return [new OutboxBacklog("responses", reader.GetInt64(0), Convert.ToDouble(reader.GetValue(1)))];
     }
 
     public async Task MarkPublishedAsync(long position, CancellationToken cancellationToken)
@@ -407,12 +420,13 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO portfolio_outbox (routing_key, payload, envelope_id, exchange)
-            VALUES (@routingKey, @payload, @envelopeId, @exchange);
+            INSERT INTO portfolio_outbox (routing_key, payload, envelope_id, exchange, traceparent)
+            VALUES (@routingKey, @payload, @envelopeId, @exchange, @traceParent);
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("routingKey", routingKey);
         command.Parameters.AddWithValue("envelopeId", envelopeId);
+        command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
         command.Parameters.AddWithValue("exchange", AssetReservationEvents.Exchange);
         command.Parameters.Add(new NpgsqlParameter("payload", NpgsqlDbType.Jsonb)
         {
@@ -428,12 +442,13 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
             Guid.CreateVersion7(), PortfolioEventTypes.CommandResult,
             Result<PortfolioCommandResult, PortfolioCommandError>.Ok(result));
         const string sql = """
-            INSERT INTO portfolio_outbox (routing_key, payload, envelope_id)
-            VALUES (@routingKey, @payload, @envelopeId);
+            INSERT INTO portfolio_outbox (routing_key, payload, envelope_id, traceparent)
+            VALUES (@routingKey, @payload, @envelopeId, @traceParent);
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("routingKey", SucceededRoutingKey);
         command.Parameters.AddWithValue("envelopeId", result.EnvelopeId);
+        command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
         command.Parameters.Add(new NpgsqlParameter("payload", NpgsqlDbType.Jsonb)
         {
             Value = JsonSerializer.Serialize(response, PortfolioJson.Options)

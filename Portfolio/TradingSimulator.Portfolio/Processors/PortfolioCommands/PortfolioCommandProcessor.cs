@@ -13,6 +13,7 @@ public sealed class PortfolioCommandProcessor(
     IIdempotencyStore idempotency,
     IResponsePublisher responses,
     IAssetNotifier notifier,
+    IPortfolioMetrics metrics,
     TimeProvider clock,
     ILogger<PortfolioCommandProcessor> logger)
 {
@@ -69,6 +70,7 @@ public sealed class PortfolioCommandProcessor(
         {
             if (await lease.WasProcessedAsync(cancellationToken))
             {
+                metrics.DuplicateEnvelope();
                 logger.LogInformation("Rejected duplicated envelope {EnvelopeId}.", envelopeId);
                 return;
             }
@@ -152,12 +154,17 @@ public sealed class PortfolioCommandProcessor(
             if (!saved.IsError)
             {
                 logger.LogInformation("Applied {Operation} of {Quantity} to {Ticker} of account {AccountId}.", command.Operation, command.Quantity, ticker.ResultValue, account.ResultValue);
+                if (command.OrderId is null)
+                    metrics.CommandApplied(command.Operation.ToString());
+                else
+                    metrics.ReservationBlocked();
                 await NotifyAsync(asset, cancellationToken);
                 return;
             }
 
             if (saved.ErrorValue is DuplicateEnvelope)
             {
+                metrics.DuplicateEnvelope();
                 // The outcome of a previous delivery is already durable (crash before the key was written).
                 logger.LogInformation("Envelope {EnvelopeId} was already applied; skipping.", envelopeId);
                 return;
@@ -217,6 +224,7 @@ public sealed class PortfolioCommandProcessor(
         if (kind is null)
             throw new InvalidOperationException($"Could not block the assets of order {orderId}: {error.GetType().Name}.");
 
+        metrics.ReservationRejected(kind.Value.ToString());
         logger.LogWarning("Order {OrderId}: asset block failed ({Kind}).", orderId, kind);
         var failure = new AssetBlockError(
             orderId, context.AccountId ?? Guid.Empty, (context.Ticker ?? string.Empty).Trim().ToUpperInvariant(), kind.Value, error.GetType().Name);
@@ -281,6 +289,7 @@ public sealed class PortfolioCommandProcessor(
                 envelopeId, asset, orderId, reservation.Remaining, close ? 0 : left, close, cancellationToken);
             if (!settled.IsError)
             {
+                metrics.OrderSettled(eventName);
                 logger.LogInformation("{EventType} of order {OrderId} settled.", eventName, orderId);
                 if (changed)
                     await NotifyAsync(asset!, cancellationToken);
@@ -289,6 +298,7 @@ public sealed class PortfolioCommandProcessor(
 
             if (settled.ErrorValue is DuplicateEnvelope)
             {
+                metrics.DuplicateEnvelope();
                 logger.LogInformation("Envelope {EnvelopeId} was already applied; skipping.", envelopeId);
                 return;
             }
@@ -307,6 +317,7 @@ public sealed class PortfolioCommandProcessor(
         if (attempts >= MaxSettleAttempts)
         {
             _settleAttempts.TryRemove(envelopeId, out _);
+            metrics.SettlementDiscarded();
             logger.LogWarning(
                 "{EventType} {EnvelopeId}: no reservation for order {OrderId} after {Attempts} attempts; discarded.",
                 eventName, envelopeId, orderId, attempts);
@@ -321,6 +332,7 @@ public sealed class PortfolioCommandProcessor(
 
     private async Task RejectAsync(Context context, IPortfolioError error, Asset? asset, string? rawMessage, CancellationToken cancellationToken)
     {
+        metrics.CommandRejected(error.GetType().Name);
         logger.LogWarning("Command {EnvelopeId} failed: {Error}.", context.EnvelopeId, error.GetType().Name);
 
         var failure = new PortfolioCommandError(

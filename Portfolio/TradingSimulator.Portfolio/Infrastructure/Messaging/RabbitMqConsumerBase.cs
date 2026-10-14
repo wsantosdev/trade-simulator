@@ -1,6 +1,8 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.Portfolio.Infrastructure.Telemetry;
 
 namespace TradingSimulator.Portfolio.Infrastructure.Messaging;
 
@@ -56,16 +58,20 @@ public abstract class RabbitMqConsumerBase(IConfiguration configuration, ILogger
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
+            using var activity = PortfolioTelemetry.Service.StartConsumer(QueueName, ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers));
             try
             {
                 await HandleAsync(Encoding.UTF8.GetString(delivery.Body.Span), stoppingToken);
                 await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
+                PortfolioTelemetry.Service.MessageConsumed(QueueName, "acked");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
             }
             catch (Exception exception)
             {
+                activity.Fail(exception);
+                PortfolioTelemetry.Service.MessageConsumed(QueueName, "requeued");
                 logger.LogError(exception, "Failed to process a message from {Queue}; it will be redelivered.", QueueName);
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 await channel.BasicNackAsync(delivery.DeliveryTag, false, true, stoppingToken);

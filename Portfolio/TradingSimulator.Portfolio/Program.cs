@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
 using StackExchange.Redis;
+using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Portfolio.Common;
 using TradingSimulator.Portfolio.Features.GetAsset;
 using TradingSimulator.Portfolio.Features.SearchAssets;
@@ -9,12 +10,22 @@ using TradingSimulator.Portfolio.Infrastructure.Idempotency;
 using TradingSimulator.Portfolio.Infrastructure.Messaging;
 using TradingSimulator.Portfolio.Infrastructure.Realtime;
 using TradingSimulator.Portfolio.Infrastructure.Serialization;
+using TradingSimulator.Portfolio.Infrastructure.Telemetry;
 using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Portfolio");
 var redisConnection = builder.Configuration.GetConnectionString("Redis");
 builder.Services.AddOpenApi();
+builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, PortfolioTelemetry.Service);
+builder.Services.AddHealthChecks()
+    .AddProbe("postgres", async (sp, ct) =>
+    {
+        await using var connection = await sp.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync(ct);
+    })
+    .AddProbe("redis", async (sp, _) => await sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase().PingAsync())
+    .AddRabbitMqProbe();
+builder.Services.AddSingleton<IPortfolioMetrics, PortfolioMetrics>();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     foreach (var converter in PortfolioJson.Options.Converters)
@@ -38,6 +49,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 builder.Services.AddSingleton<PostgresAssetStore>();
 builder.Services.AddSingleton<IAssetStore>(sp => sp.GetRequiredService<PostgresAssetStore>());
 builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresAssetStore>());
+builder.Services.AddOutboxBacklogMonitor<PostgresAssetStore>();
 builder.Services.AddSingleton<PostgresAssetQueries>();
 builder.Services.AddSingleton<IAssetSearch>(sp => sp.GetRequiredService<PostgresAssetQueries>());
 builder.Services.AddSingleton<IAssetLookup>(sp => sp.GetRequiredService<PostgresAssetQueries>());
@@ -90,6 +102,7 @@ app.Use(async (context, next) =>
     if (string.IsNullOrWhiteSpace(correlationId))
         correlationId = Guid.CreateVersion7().ToString("D");
     context.Response.Headers["X-Correlation-Id"] = correlationId;
+    System.Diagnostics.Activity.Current?.SetTag("correlation.id", correlationId);
     await next();
 });
 app.UseCors();
@@ -97,6 +110,7 @@ app.UseCors();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
+app.MapTradingSimulatorHealth();
 app.MapSearchAssetsEndpoint();
 app.MapGetAssetEndpoint();
 app.MapHub<PortfolioHub>(PortfolioHub.Route);

@@ -75,6 +75,10 @@ CREATE INDEX IF NOT EXISTS ix_portfolio_outbox_pending_position
 -- Exchange of the outbox row (null = the portfolio events exchange).
 ALTER TABLE portfolio_outbox ADD COLUMN IF NOT EXISTS exchange TEXT NULL;
 
+ALTER TABLE portfolio_outbox ADD COLUMN IF NOT EXISTS traceparent TEXT NULL;
+
+ALTER TABLE portfolio_outbox ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
 -- Custody of each sell order: written in the same transaction as the asset events that block the quantity.
 CREATE TABLE IF NOT EXISTS order_reservations (
     order_id UUID NOT NULL,

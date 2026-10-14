@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.Portfolio.Infrastructure.Telemetry;
 using Moonad;
 using TradingSimulator.Portfolio.Processors.PortfolioCommands;
 using TradingSimulator.Portfolio.Infrastructure.Serialization;
@@ -26,11 +28,12 @@ public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IR
     }
 
     public Task PublishPendingAsync(PendingResponse pending, CancellationToken cancellationToken) =>
-        PublishAsync(pending.Exchange ?? ExchangeName, pending.RoutingKey, pending.Payload, cancellationToken);
+        PublishAsync(pending.Exchange ?? ExchangeName, pending.RoutingKey, pending.Payload, cancellationToken, pending.TraceParent);
 
-    private async Task PublishAsync(string exchange, string routingKey, string payload, CancellationToken cancellationToken)
+    private async Task PublishAsync(string exchange, string routingKey, string payload, CancellationToken cancellationToken, string? traceParent = null)
     {
         await _gate.WaitAsync(cancellationToken);
+        using var activity = PortfolioTelemetry.Service.StartPublisher(exchange, routingKey, traceParent);
         try
         {
             if (_channel is null)
@@ -47,6 +50,8 @@ public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IR
                 await _channel.ExchangeDeclareAsync(exchange, ExchangeType.Topic, durable: true, cancellationToken: cancellationToken);
 
             var properties = new BasicProperties { ContentType = "application/json", DeliveryMode = DeliveryModes.Persistent };
+            if (activity?.Id is { } id)
+                properties.Headers = new Dictionary<string, object?> { [ServiceTelemetry.TraceParentHeader] = id };
             await _channel.BasicPublishAsync(
                 exchange: exchange,
                 routingKey: routingKey,
@@ -54,9 +59,11 @@ public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IR
                 basicProperties: properties,
                 body: Encoding.UTF8.GetBytes(payload),
                 cancellationToken: cancellationToken);
+            PortfolioTelemetry.Service.OutboxPublished(exchange);
         }
-        catch
+        catch (Exception exception)
         {
+            activity.Fail(exception);
             await ResetAsync();
             throw;
         }

@@ -14,7 +14,7 @@ public sealed class PortfolioCommandProcessorTests
     private readonly Guid _account = Guid.CreateVersion7();
 
     public PortfolioCommandProcessorTests() =>
-        _processor = new(_store, _idempotency, _responses, _notifier, TimeProvider.System, NullLogger<PortfolioCommandProcessor>.Instance);
+        _processor = new(_store, _idempotency, _responses, _notifier, new Infrastructure.FakeMetrics(), TimeProvider.System, NullLogger<PortfolioCommandProcessor>.Instance);
 
     private Task Run(AssetOperation operation, string ticker, long quantity, Guid? id = null) =>
         _processor.ExecuteAsync(id ?? Guid.CreateVersion7(), new AssetCommand(operation, _account, ticker, quantity), default);

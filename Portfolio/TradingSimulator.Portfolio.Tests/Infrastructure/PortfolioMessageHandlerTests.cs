@@ -21,7 +21,7 @@ public sealed class PortfolioMessageHandlerTests
     public PortfolioMessageHandlerTests()
     {
         var processor = new PortfolioCommandProcessor(
-            _store, _idempotency, _responses, new FakeNotifier(), TimeProvider.System, NullLogger<PortfolioCommandProcessor>.Instance);
+            _store, _idempotency, _responses, new FakeNotifier(), new FakeMetrics(), TimeProvider.System, NullLogger<PortfolioCommandProcessor>.Instance);
         _commands = new(processor, NullLogger<PortfolioCommandMessageHandler>.Instance);
         _orders = new(processor, NullLogger<OrderEventMessageHandler>.Instance);
         _exchange = new(processor, NullLogger<ExchangeEventMessageHandler>.Instance);
