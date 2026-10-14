@@ -1,4 +1,5 @@
 using Npgsql;
+using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Exchange.Features.ImportInstruments;
 using TradingSimulator.Exchange.Features.ImportQuotes;
 using TradingSimulator.Exchange.Features.GetInstrument;
@@ -7,6 +8,7 @@ using TradingSimulator.Exchange.Features.QueryQuotes;
 using TradingSimulator.Exchange.Infrastructure.Database;
 using TradingSimulator.Exchange.Infrastructure.Messaging;
 using TradingSimulator.Exchange.Infrastructure.Sources;
+using TradingSimulator.Exchange.Infrastructure.Telemetry;
 using TradingSimulator.Exchange.Processors.OfferBook;
 using TradingSimulator.Exchange.Processors.OrderCommands;
 using TradingSimulator.Exchange.Processors.Quotes;
@@ -15,6 +17,14 @@ using TradingSimulator.Exchange.Simulation;
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Exchange");
 builder.Services.AddOpenApi();
+builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, ExchangeTelemetry.Service);
+builder.Services.AddHealthChecks()
+    .AddProbe("postgres", async (sp, ct) =>
+    {
+        await using var connection = await sp.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync(ct);
+    })
+    .AddRabbitMqProbe();
+builder.Services.AddSingleton<IExchangeMetrics, ExchangeMetrics>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:4204").AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddSingleton(TimeProvider.System);
@@ -47,7 +57,7 @@ builder.Services.AddSingleton(sp => new OrderBookEngine(
     sp.GetRequiredService<QuoteSimulator>(), sp.GetRequiredService<IOrderEventPublisher>(),
     sp.GetRequiredService<IOfferBookPublisher>(), sp.GetRequiredService<OfferBookInterestRegistry>(),
     sp.GetRequiredService<SimulatedLiquidity>(), sp.GetRequiredService<TimeProvider>(),
-    builder.Configuration.GetValue<TimeSpan>("Simulation:SessionClockOffset"),
+    builder.Configuration.GetValue<TimeSpan>("Simulation:SessionClockOffset"), sp.GetRequiredService<IExchangeMetrics>(),
     sp.GetRequiredService<ILogger<OrderBookEngine>>()));
 builder.Services.AddSingleton<OfferBookInterestProcessor>();
 builder.Services.AddHostedService<RabbitMqQuoteInterestConsumer>();
@@ -96,6 +106,7 @@ app.Use(async (context, next) =>
     if (string.IsNullOrWhiteSpace(correlationId))
         correlationId = Guid.CreateVersion7().ToString("D");
     context.Response.Headers["X-Correlation-Id"] = correlationId;
+    System.Diagnostics.Activity.Current?.SetTag("correlation.id", correlationId);
     await next();
 });
 app.UseCors();
@@ -103,6 +114,7 @@ app.UseCors();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
+app.MapTradingSimulatorHealth();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapSearchInstrumentsEndpoint();
 app.MapGetInstrumentEndpoint();

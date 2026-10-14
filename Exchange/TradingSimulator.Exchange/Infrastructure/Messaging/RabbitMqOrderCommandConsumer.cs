@@ -1,6 +1,8 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.Exchange.Infrastructure.Telemetry;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
 using TradingSimulator.Exchange.Processors.OrderCommands;
 
@@ -56,6 +58,8 @@ public sealed class RabbitMqOrderCommandConsumer(
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
+            using var activity = ExchangeTelemetry.Service.StartConsumer(
+                OrderTopology.CommandsQueue, ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers));
             try
             {
                 var command = OrderCommandParser.Parse(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options);
@@ -64,12 +68,15 @@ public sealed class RabbitMqOrderCommandConsumer(
                 else
                     await engine.HandleAsync(command.ResultValue, stoppingToken);
                 await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, stoppingToken);
+                ExchangeTelemetry.Service.MessageConsumed(OrderTopology.CommandsQueue, "acked");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
             }
             catch (Exception exception)
             {
+                activity.Fail(exception);
+                ExchangeTelemetry.Service.MessageConsumed(OrderTopology.CommandsQueue, "requeued");
                 logger.LogError(exception, "Could not process an order command; it will be redelivered.");
                 await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: true, stoppingToken);
             }

@@ -19,6 +19,7 @@ public sealed class OrderBookEngine(
     SimulatedLiquidity liquidity,
     TimeProvider timeProvider,
     TimeSpan sessionClockOffset,
+    IExchangeMetrics metrics,
     ILogger<OrderBookEngine> logger)
 {
     private static readonly TimeSpan IdleRetention = TimeSpan.FromMinutes(10);
@@ -34,6 +35,13 @@ public sealed class OrderBookEngine(
     public Task HandleAsync(OrderCommand command, CancellationToken cancellationToken) =>
         SerializedAsync(async () =>
         {
+            metrics.CommandHandled(command switch
+            {
+                SubmitOrder => "submit",
+                CancelOrder => "cancel",
+                ReplaceOrder => "replace",
+                _ => "reject"
+            });
             switch (command)
             {
                 case SubmitOrder submit:
@@ -300,14 +308,28 @@ public sealed class OrderBookEngine(
     {
         if (_pendingEvents.Count >= MaxPendingEvents)
         {
+            metrics.EventDropped();
             logger.LogError("Order event backlog is full; dropping {EventType}.", orderEvent.GetType().Name);
             return;
         }
 
+        metrics.EventQueued(orderEvent.GetType().Name);
         _pendingEvents.Enqueue((Guid.CreateVersion7(), orderEvent));
     }
 
     private async Task FlushEventsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await PublishPendingAsync(cancellationToken);
+        }
+        finally
+        {
+            metrics.EventBacklog(_pendingEvents.Count);
+        }
+    }
+
+    private async Task PublishPendingAsync(CancellationToken cancellationToken)
     {
         while (_pendingEvents.TryPeek(out var pending))
         {

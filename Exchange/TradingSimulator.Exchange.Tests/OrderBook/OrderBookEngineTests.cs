@@ -43,7 +43,7 @@ public sealed class OrderBookEngineTests
                 new Random(seed), NullLogger<QuoteSimulator>.Instance);
             Engine = new OrderBookEngine(
                 Quotes, Orders, OfferBook, Interest, new SimulatedLiquidity(new Random(seed + 1)), Clock,
-                TimeSpan.Zero, NullLogger<OrderBookEngine>.Instance);
+                TimeSpan.Zero, new FakeMetrics(), NullLogger<OrderBookEngine>.Instance);
         }
 
         public Task Send(OrderCommand command) => Engine.HandleAsync(command, default);

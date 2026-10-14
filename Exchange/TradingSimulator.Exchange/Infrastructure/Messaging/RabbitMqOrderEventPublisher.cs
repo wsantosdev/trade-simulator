@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.Exchange.Infrastructure.Telemetry;
 using TradingSimulator.Exchange.Domain.Events;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
 using TradingSimulator.Exchange.Processors.OrderCommands;
@@ -19,16 +21,21 @@ public sealed class RabbitMqOrderEventPublisher(IConfiguration configuration) : 
         var eventType = message.GetType().Name.Replace("Message", string.Empty, StringComparison.Ordinal);
         var envelope = new EventEnvelope<object>(eventId, eventType, message);
         await _gate.WaitAsync(cancellationToken);
+        using var activity = ExchangeTelemetry.Service.StartPublisher(OrderTopology.EventsExchange, envelope.EventType, null);
         try
         {
             var channel = await EnsureChannelAsync(cancellationToken);
             var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, MessageJson.Options));
             var properties = new BasicProperties { ContentType = "application/json", DeliveryMode = DeliveryModes.Persistent };
+            if (activity?.Id is { } traceParent)
+                properties.Headers = new Dictionary<string, object?> { [ServiceTelemetry.TraceParentHeader] = traceParent };
             await channel.BasicPublishAsync(
                 OrderTopology.EventsExchange, envelope.EventType, mandatory: false, properties, body, cancellationToken);
+            ExchangeTelemetry.Service.OutboxPublished(OrderTopology.EventsExchange);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            activity.Fail(exception);
             await ResetAsync();
             throw;
         }
