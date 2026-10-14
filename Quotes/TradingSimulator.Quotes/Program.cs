@@ -1,7 +1,8 @@
-using TradingSimulator.Quotes.Api.Features.QuoteQuery;
-using TradingSimulator.Quotes.Api.Hubs;
-using TradingSimulator.Quotes.Application;
-using TradingSimulator.Quotes.Infrastructure;
+using TradingSimulator.Quotes.Common;
+using TradingSimulator.Quotes.Features.QueryQuotes;
+using TradingSimulator.Quotes.Infrastructure.Messaging;
+using TradingSimulator.Quotes.Infrastructure.Realtime;
+using TradingSimulator.Quotes.Infrastructure.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();

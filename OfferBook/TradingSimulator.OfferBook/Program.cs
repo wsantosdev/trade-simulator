@@ -1,7 +1,8 @@
-using TradingSimulator.OfferBook.Api.Features.OfferBookQuery;
-using TradingSimulator.OfferBook.Api.Hubs;
-using TradingSimulator.OfferBook.Application;
-using TradingSimulator.OfferBook.Infrastructure;
+using TradingSimulator.OfferBook.Common;
+using TradingSimulator.OfferBook.Features.QueryOfferBook;
+using TradingSimulator.OfferBook.Infrastructure.Messaging;
+using TradingSimulator.OfferBook.Infrastructure.Realtime;
+using TradingSimulator.OfferBook.Infrastructure.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();

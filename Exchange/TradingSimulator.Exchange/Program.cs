@@ -1,11 +1,13 @@
 using Npgsql;
-using TradingSimulator.Exchange.Api;
-using TradingSimulator.Exchange.Api.Features.InstrumentImport;
-using TradingSimulator.Exchange.Api.Features.InstrumentQueries;
-using TradingSimulator.Exchange.Api.Features.QuoteImport;
-using TradingSimulator.Exchange.Api.Features.QuoteQueries;
-using TradingSimulator.Exchange.Application;
-using TradingSimulator.Exchange.Infrastructure;
+using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Features.ImportInstruments;
+using TradingSimulator.Exchange.Features.ImportQuotes;
+using TradingSimulator.Exchange.Features.QueryInstruments;
+using TradingSimulator.Exchange.Features.QueryQuotes;
+using TradingSimulator.Exchange.Infrastructure.Database;
+using TradingSimulator.Exchange.Infrastructure.Messaging;
+using TradingSimulator.Exchange.Infrastructure.Simulation;
+using TradingSimulator.Exchange.Infrastructure.Sources;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Exchange");

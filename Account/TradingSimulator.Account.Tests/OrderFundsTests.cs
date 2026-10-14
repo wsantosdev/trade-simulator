@@ -1,12 +1,14 @@
-global using FundsReservationResponse = TradingSimulator.Commons.EventEnvelope<Moonad.Result<TradingSimulator.Account.Application.FundsReservedMessage, TradingSimulator.Account.Application.FundsReservationError>>;
+global using FundsReservationResponse = TradingSimulator.Commons.EventEnvelope<Moonad.Result<TradingSimulator.Account.Infrastructure.Messaging.FundsReservedMessage, TradingSimulator.Account.Infrastructure.Messaging.FundsReservationError>>;
 
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
-using TradingSimulator.Account.Application;
-using TradingSimulator.Account.Domain;
-using TradingSimulator.Account.Infrastructure;
 using Xunit;
+using TradingSimulator.Account.Common;
+using TradingSimulator.Account.Domain;
+using TradingSimulator.Account.Domain.ValueObjects;
+using TradingSimulator.Account.Infrastructure.Messaging;
+using TradingSimulator.Account.Infrastructure.Serialization;
 
 namespace TradingSimulator.Account.Tests;
 
@@ -17,7 +19,7 @@ public sealed class OrderFundsTests
     [Fact]
     public void Release_moves_provisioned_back_to_available_and_debit_removes_provisioned()
     {
-        var account = Domain.Account.Open(AccountId.New()).ResultValue;
+        var account = Domain.Entities.Account.Open(AccountId.New()).ResultValue;
         account.Deposit(100m);
         account.Reserve(60m, OrderId.New());
 

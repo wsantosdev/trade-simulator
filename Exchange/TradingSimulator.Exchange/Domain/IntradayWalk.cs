@@ -1,3 +1,6 @@
+using TradingSimulator.Exchange.Domain.Entities;
+using TradingSimulator.Exchange.Domain.ValueObjects;
+
 namespace TradingSimulator.Exchange.Domain;
 
 // Brownian bridge from the opening price to the target closing price, one step per second.

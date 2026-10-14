@@ -1,9 +1,10 @@
 using Moonad;
 using System.Runtime.CompilerServices;
-using TradingSimulator.Account.Domain;
-using TradingSimulator.Account.Api;
 using Microsoft.AspNetCore.Http;
 using Xunit;
+using TradingSimulator.Account.Domain;
+using TradingSimulator.Account.Domain.ValueObjects;
+using TradingSimulator.Account.Infrastructure.Http;
 
 namespace TradingSimulator.Account.Tests;
 
@@ -12,7 +13,7 @@ public sealed class AccountTests
     [Fact]
     public void Open_starts_with_zero_balances()
     {
-        var account = Value(Domain.Account.Open(AccountId.New()));
+        var account = Value(Domain.Entities.Account.Open(AccountId.New()));
 
         Assert.Equal(0m, account.AvailableBalance);
         Assert.Equal(0m, account.ProvisionedBalance);
@@ -31,7 +32,7 @@ public sealed class AccountTests
 
         Assert.True(result.IsError);
         Assert.IsType<InvalidAccountId>(result.ErrorValue);
-        Assert.IsType<InvalidAccountId>(Domain.Account.Open(default).ErrorValue);
+        Assert.IsType<InvalidAccountId>(Domain.Entities.Account.Open(default).ErrorValue);
     }
 
     [Theory]
@@ -108,7 +109,7 @@ public sealed class AccountTests
         Assert.True(account.Reserve(50m).IsOk);
         Assert.True(account.Withdraw(30m).IsOk);
 
-        var rehydrated = Value(Domain.Account.Rehydrate(account.Id, account.UncommittedEvents));
+        var rehydrated = Value(Domain.Entities.Account.Rehydrate(account.Id, account.UncommittedEvents));
 
         Assert.Equal(70m, rehydrated.AvailableBalance);
         Assert.Equal(50m, rehydrated.ProvisionedBalance);
@@ -123,7 +124,7 @@ public sealed class AccountTests
         var snapshot = Value(account.CreateSnapshot());
 
         Assert.True(account.Withdraw(30m).IsOk);
-        var rehydrated = Value(Domain.Account.Rehydrate(account.Id, snapshot, [account.UncommittedEvents[^1]]));
+        var rehydrated = Value(Domain.Entities.Account.Rehydrate(account.Id, snapshot, [account.UncommittedEvents[^1]]));
 
         Assert.Equal(70m, rehydrated.AvailableBalance);
         Assert.Equal(50m, rehydrated.ProvisionedBalance);
@@ -136,7 +137,7 @@ public sealed class AccountTests
         var account = OpenAccount();
         var other = OpenAccount();
 
-        var result = Domain.Account.Rehydrate(account.Id, Value(other.CreateSnapshot()), []);
+        var result = Domain.Entities.Account.Rehydrate(account.Id, Value(other.CreateSnapshot()), []);
 
         Assert.IsType<SnapshotAccountMismatch>(result.ErrorValue);
     }
@@ -162,7 +163,7 @@ public sealed class AccountTests
         Assert.Empty(errorType.GetProperties());
     }
 
-    private static Domain.Account OpenAccount() => Value(Domain.Account.Open(AccountId.New()));
+    private static Domain.Entities.Account OpenAccount() => Value(Domain.Entities.Account.Open(AccountId.New()));
 
     private static T Value<T>(Result<T, IAccountError> result) where T : notnull
     {

@@ -1,8 +1,11 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
-using TradingSimulator.Exchange.Application;
+using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Domain;
-using TradingSimulator.Exchange.Infrastructure;
+using TradingSimulator.Exchange.Domain.Enums;
+using TradingSimulator.Exchange.Domain.ValueObjects;
+using TradingSimulator.Exchange.Infrastructure.Messaging;
+using TradingSimulator.Exchange.Infrastructure.Serialization;
 
 namespace TradingSimulator.Exchange.Tests.OrderBook;
 
@@ -266,7 +269,7 @@ public sealed class OrderBookEngineTests
     [Fact]
     public void Simulated_liquidity_replaces_orders_outside_the_grid_and_is_deterministic()
     {
-        var book = new Exchange.Domain.OrderBook(Petr);
+        var book = new Exchange.Domain.Entities.OrderBook(Petr);
         var liquidity = new SimulatedLiquidity(new Random(3));
         liquidity.Maintain(book, 35m, perturb: false);
         liquidity.Maintain(book, 36m, perturb: false);

@@ -1,8 +1,11 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
-using TradingSimulator.Exchange.Application;
+using TradingSimulator.Exchange.Common;
 using TradingSimulator.Exchange.Domain;
-using TradingSimulator.Exchange.Infrastructure;
+using TradingSimulator.Exchange.Domain.Entities;
+using TradingSimulator.Exchange.Domain.Enums;
+using TradingSimulator.Exchange.Domain.ValueObjects;
+using TradingSimulator.Exchange.Infrastructure.Serialization;
 
 namespace TradingSimulator.Exchange.Tests.Simulation;
 

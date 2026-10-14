@@ -1,5 +1,5 @@
-using TradingSimulator.Account.Infrastructure;
 using Xunit;
+using TradingSimulator.Account.Infrastructure.Database;
 
 namespace TradingSimulator.Account.Tests;
 

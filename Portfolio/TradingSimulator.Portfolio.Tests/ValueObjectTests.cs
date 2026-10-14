@@ -1,4 +1,5 @@
 using TradingSimulator.Portfolio.Domain;
+using TradingSimulator.Portfolio.Domain.ValueObjects;
 
 namespace TradingSimulator.Portfolio.Tests;
 

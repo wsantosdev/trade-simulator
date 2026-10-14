@@ -1,9 +1,12 @@
 using System.Text.Json;
 using Moonad;
-using TradingSimulator.Portfolio.Application;
+using TradingSimulator.Portfolio.Common;
 using TradingSimulator.Portfolio.Domain;
-using TradingSimulator.Portfolio.Domain.Features.Deposits;
-using TradingSimulator.Portfolio.Infrastructure;
+using TradingSimulator.Portfolio.Domain.Entities;
+using TradingSimulator.Portfolio.Domain.Enums;
+using TradingSimulator.Portfolio.Domain.ValueObjects;
+using TradingSimulator.Portfolio.Infrastructure.Messaging;
+using TradingSimulator.Portfolio.Infrastructure.Serialization;
 
 namespace TradingSimulator.Portfolio.Tests;
 

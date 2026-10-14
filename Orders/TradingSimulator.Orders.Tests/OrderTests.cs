@@ -1,4 +1,7 @@
 using TradingSimulator.Orders.Domain;
+using TradingSimulator.Orders.Domain.Entities;
+using TradingSimulator.Orders.Domain.Enums;
+using TradingSimulator.Orders.Domain.ValueObjects;
 
 namespace TradingSimulator.Orders.Tests;
 

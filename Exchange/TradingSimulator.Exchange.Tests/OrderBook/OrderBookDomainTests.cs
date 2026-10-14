@@ -1,4 +1,6 @@
-using TradingSimulator.Exchange.Domain;
+using TradingSimulator.Exchange.Domain.Entities;
+using TradingSimulator.Exchange.Domain.Enums;
+using TradingSimulator.Exchange.Domain.ValueObjects;
 
 namespace TradingSimulator.Exchange.Tests.OrderBook;
 
@@ -13,9 +15,9 @@ public sealed class OrderBookDomainTests
     private static BookOrder Limit(OrderSide side, decimal price, long quantity, OrderOrigin origin = OrderOrigin.User) =>
         BookOrder.Limit(OrderId.New(), side, P(price), Q(quantity), origin);
 
-    private static Exchange.Domain.OrderBook Book(params BookOrder[] orders)
+    private static Exchange.Domain.Entities.OrderBook Book(params BookOrder[] orders)
     {
-        var book = new Exchange.Domain.OrderBook(Petr);
+        var book = new Exchange.Domain.Entities.OrderBook(Petr);
         foreach (var order in orders)
             Assert.False(book.Submit(order).IsError);
         return book;
@@ -33,7 +35,7 @@ public sealed class OrderBookDomainTests
     [Fact]
     public void Price_off_tick_is_rejected()
     {
-        var book = new Exchange.Domain.OrderBook(Petr);
+        var book = new Exchange.Domain.Entities.OrderBook(Petr);
         Assert.True(book.Submit(Limit(OrderSide.Buy, 10.005m, 100)).IsError);
     }
 

@@ -1,5 +1,5 @@
-using TradingSimulator.Exchange.Application;
-using TradingSimulator.Exchange.Infrastructure;
+using TradingSimulator.Exchange.Common;
+using TradingSimulator.Exchange.Infrastructure.Sources;
 
 namespace TradingSimulator.Exchange.Tests.Instruments;
 

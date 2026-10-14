@@ -1,11 +1,14 @@
 using Microsoft.AspNetCore.Diagnostics;
-using TradingSimulator.Account.Api.Features.AccountCreation;
-using TradingSimulator.Account.Api.Features.AccountQuery;
-using TradingSimulator.Account.Api.Features.Deposits;
-using TradingSimulator.Account.Api.Features.Reservations;
-using TradingSimulator.Account.Api.Features.Withdrawals;
-using TradingSimulator.Account.Application;
-using TradingSimulator.Account.Infrastructure;
+using TradingSimulator.Account.Common;
+using TradingSimulator.Account.Domain.Entities;
+using TradingSimulator.Account.Features.Deposit;
+using TradingSimulator.Account.Features.GetAccount;
+using TradingSimulator.Account.Features.OpenAccount;
+using TradingSimulator.Account.Features.ReserveFunds;
+using TradingSimulator.Account.Features.WithdrawFunds;
+using TradingSimulator.Account.Infrastructure.Database;
+using TradingSimulator.Account.Infrastructure.Http;
+using TradingSimulator.Account.Infrastructure.Messaging;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Accounts");

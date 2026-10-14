@@ -1,10 +1,13 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
 using StackExchange.Redis;
-using TradingSimulator.Portfolio.Api.Features.Queries;
-using TradingSimulator.Portfolio.Api.Hubs;
-using TradingSimulator.Portfolio.Application;
-using TradingSimulator.Portfolio.Infrastructure;
+using TradingSimulator.Portfolio.Common;
+using TradingSimulator.Portfolio.Features.QueryAssets;
+using TradingSimulator.Portfolio.Infrastructure.Database;
+using TradingSimulator.Portfolio.Infrastructure.Idempotency;
+using TradingSimulator.Portfolio.Infrastructure.Messaging;
+using TradingSimulator.Portfolio.Infrastructure.Realtime;
+using TradingSimulator.Portfolio.Infrastructure.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Portfolio");

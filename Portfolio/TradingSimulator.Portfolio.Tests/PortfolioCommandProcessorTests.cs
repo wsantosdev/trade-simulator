@@ -1,11 +1,14 @@
-using PortfolioResponse = TradingSimulator.Commons.EventEnvelope<Moonad.Result<TradingSimulator.Portfolio.Application.PortfolioCommandResult, TradingSimulator.Portfolio.Application.PortfolioCommandError>>;
-using AssetReservationResponse = TradingSimulator.Commons.EventEnvelope<Moonad.Result<TradingSimulator.Portfolio.Application.AssetsBlocked, TradingSimulator.Portfolio.Application.AssetBlockError>>;
+using PortfolioResponse = TradingSimulator.Commons.EventEnvelope<Moonad.Result<TradingSimulator.Portfolio.Common.PortfolioCommandResult, TradingSimulator.Portfolio.Common.PortfolioCommandError>>;
+using AssetReservationResponse = TradingSimulator.Commons.EventEnvelope<Moonad.Result<TradingSimulator.Portfolio.Infrastructure.Messaging.AssetsBlocked, TradingSimulator.Portfolio.Infrastructure.Messaging.AssetBlockError>>;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
-using TradingSimulator.Portfolio.Application;
+using TradingSimulator.Portfolio.Common;
 using TradingSimulator.Portfolio.Domain;
+using TradingSimulator.Portfolio.Domain.Entities;
+using TradingSimulator.Portfolio.Domain.ValueObjects;
+using TradingSimulator.Portfolio.Infrastructure.Messaging;
 
 namespace TradingSimulator.Portfolio.Tests;
 

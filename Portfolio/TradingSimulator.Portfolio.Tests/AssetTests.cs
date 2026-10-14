@@ -1,8 +1,7 @@
 using TradingSimulator.Portfolio.Domain;
-using TradingSimulator.Portfolio.Domain.Features.Blocks;
-using TradingSimulator.Portfolio.Domain.Features.Deposits;
-using TradingSimulator.Portfolio.Domain.Features.Unblocks;
-using TradingSimulator.Portfolio.Domain.Features.Withdrawals;
+using TradingSimulator.Portfolio.Domain.Entities;
+using TradingSimulator.Portfolio.Domain.Events;
+using TradingSimulator.Portfolio.Domain.ValueObjects;
 
 namespace TradingSimulator.Portfolio.Tests;
 

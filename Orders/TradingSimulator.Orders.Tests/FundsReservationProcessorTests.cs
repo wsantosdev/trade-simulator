@@ -1,12 +1,14 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
-using TradingSimulator.Orders.Application;
+using TradingSimulator.Orders.Common;
 using TradingSimulator.Orders.Domain;
-using TradingSimulator.Orders.Domain.Features.Cancellations;
-using TradingSimulator.Orders.Domain.Features.Submission;
-using TradingSimulator.Orders.Domain.Features.Rejection;
-using TradingSimulator.Orders.Infrastructure;
+using TradingSimulator.Orders.Domain.Entities;
+using TradingSimulator.Orders.Domain.Enums;
+using TradingSimulator.Orders.Domain.Events;
+using TradingSimulator.Orders.Domain.ValueObjects;
+using TradingSimulator.Orders.Infrastructure.Messaging;
+using TradingSimulator.Orders.Infrastructure.Serialization;
 
 namespace TradingSimulator.Orders.Tests;
 
@@ -56,11 +58,11 @@ public sealed class FundsReservationProcessorTests
         Wrap("{\"isError\":false,\"result\":{\"orderId\":\"" + order.Id.Guid + "\",\"accountId\":\"" + order.AccountId.Guid +
              "\",\"amount\":1000.00}}");
 
-    private static (SubmissionOutcomeHandler Outcomes, FakeStore Store, FakeNotifier Notifier) Create(Order order)
+    private static (IOrderTransitions Outcomes, FakeStore Store, FakeNotifier Notifier) Create(Order order)
     {
         var store = new FakeStore(order);
         var notifier = new FakeNotifier();
-        return (new SubmissionOutcomeHandler(store, notifier, TimeProvider.System, NullLogger<SubmissionOutcomeHandler>.Instance), store, notifier);
+        return (new OrderTransitions(store, notifier, TimeProvider.System, NullLogger<OrderTransitions>.Instance), store, notifier);
     }
 
     private static string AssetErrorBody(Order order, string kind = "InsufficientQuantity") =>

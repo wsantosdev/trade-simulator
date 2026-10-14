@@ -1,5 +1,7 @@
-using TradingSimulator.Quotes.Application;
-using TradingSimulator.Quotes.Domain;
+using TradingSimulator.Quotes.Common;
+using TradingSimulator.Quotes.Domain.ValueObjects;
+using TradingSimulator.Quotes.Infrastructure.Messaging;
+using TradingSimulator.Quotes.Infrastructure.Serialization;
 
 namespace TradingSimulator.Quotes.Tests;
 

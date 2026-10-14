@@ -1,12 +1,16 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
-using TradingSimulator.Orders.Api.Features.Cancellation;
-using TradingSimulator.Orders.Api.Features.Queries;
-using TradingSimulator.Orders.Api.Features.Replacement;
-using TradingSimulator.Orders.Api.Features.Submission;
-using TradingSimulator.Orders.Api.Hubs;
-using TradingSimulator.Orders.Application;
-using TradingSimulator.Orders.Infrastructure;
+using TradingSimulator.Orders.Common;
+using TradingSimulator.Orders.Domain.Entities;
+using TradingSimulator.Orders.Features.CancelOrder;
+using TradingSimulator.Orders.Features.QueryOrderHistory;
+using TradingSimulator.Orders.Features.QueryOrders;
+using TradingSimulator.Orders.Features.ReplaceOrder;
+using TradingSimulator.Orders.Features.SubmitOrder;
+using TradingSimulator.Orders.Infrastructure.Database;
+using TradingSimulator.Orders.Infrastructure.Messaging;
+using TradingSimulator.Orders.Infrastructure.Realtime;
+using TradingSimulator.Orders.Infrastructure.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Orders");
@@ -28,14 +32,21 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString ?? s
 builder.Services.AddSingleton<PostgresOrderStore>();
 builder.Services.AddSingleton<IOrderStore>(sp => sp.GetRequiredService<PostgresOrderStore>());
 builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresOrderStore>());
-builder.Services.AddSingleton<IOrderQueries, PostgresOrderQueries>();
+builder.Services.AddSingleton<IOrderSearch, PostgresOrderSearch>();
+builder.Services.AddSingleton<IOrderHistory, PostgresOrderHistory>();
 builder.Services.AddSingleton<IOrderNotifier, SignalROrderNotifier>();
-builder.Services.AddSingleton<OrderRequestService>();
+builder.Services.AddSingleton<OrderTransitions>();
+builder.Services.AddSingleton<IOrderTransitions>(sp => sp.GetRequiredService<OrderTransitions>());
+builder.Services.AddSingleton<OwnedOrderUpdater>();
+builder.Services.AddSingleton<ISubmitOrder, SubmitOrderHandler>();
+builder.Services.AddSingleton<ICancelOrder, CancelOrderHandler>();
+builder.Services.AddSingleton<IReplaceOrder, ReplaceOrderHandler>();
+builder.Services.AddSingleton<IQueryOrders, QueryOrdersHandler>();
+builder.Services.AddSingleton<IQueryOrderHistory, QueryOrderHistoryHandler>();
 builder.Services.AddSingleton<ICommandPublisher, RabbitMqCommandPublisher>();
 builder.Services.AddHostedService<OutboxPublisherService>();
 builder.Services.AddSingleton<ExchangeEventProcessor>();
 builder.Services.AddHostedService<RabbitMqExchangeEventConsumer>();
-builder.Services.AddSingleton<SubmissionOutcomeHandler>();
 builder.Services.AddSingleton<FundsReservationProcessor>();
 builder.Services.AddSingleton<AssetReservationProcessor>();
 builder.Services.AddHostedService<RabbitMqFundsReservationConsumer>();
@@ -52,7 +63,8 @@ var orderStore = app.Services.GetRequiredService<PostgresOrderStore>();
 var initialization = await orderStore.InitializeAsync(app.Lifetime.ApplicationStopping);
 if (initialization.IsError)
 {
-    app.Logger.LogCritical("Order persistence could not be initialized: {Error}", initialization.ErrorValue.GetType().Name);
+    app.Logger.LogCritical("Order persistence could not be initialized: {Error}",
+        initialization.ErrorValue.GetType().Name);
     return;
 }
 
@@ -92,8 +104,11 @@ if (app.Environment.IsDevelopment())
 app.MapSendOrderEndpoint();
 app.MapCancelOrderEndpoint();
 app.MapReplaceOrderEndpoint();
-app.MapOrderQueryEndpoints();
+app.MapSearchOrdersEndpoint();
+app.MapQueryOrderHistoryEndpoint();
 app.MapHub<OrdersHub>(OrdersHub.Route);
 app.Run();
 
-public partial class Program { }
+public partial class Program
+{
+}

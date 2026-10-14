@@ -1,6 +1,9 @@
 using System.Text.Json;
-using TradingSimulator.OfferBook.Application;
-using TradingSimulator.OfferBook.Domain;
+using TradingSimulator.OfferBook.Common;
+using TradingSimulator.OfferBook.Domain.Enums;
+using TradingSimulator.OfferBook.Domain.ValueObjects;
+using TradingSimulator.OfferBook.Infrastructure.Messaging;
+using TradingSimulator.OfferBook.Infrastructure.Serialization;
 
 namespace TradingSimulator.OfferBook.Tests;
 
