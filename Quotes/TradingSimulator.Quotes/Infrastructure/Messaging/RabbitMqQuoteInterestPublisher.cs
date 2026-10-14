@@ -2,6 +2,8 @@ using TradingSimulator.Quotes.Processors.QuoteInterest;
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.Quotes.Infrastructure.Telemetry;
 using TradingSimulator.Quotes.Common;
 using TradingSimulator.Quotes.Infrastructure.Serialization;
 
@@ -16,16 +18,21 @@ public sealed class RabbitMqQuoteInterestPublisher(IConfiguration configuration)
     public async Task PublishAsync(EventEnvelope<QuoteInterestRenewed> envelope, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
+        using var activity = QuotesTelemetry.Service.StartPublisher(QuoteTopology.InterestExchange, "interest", null);
         try
         {
             var channel = await EnsureChannelAsync(cancellationToken);
             var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, QuoteJson.Options));
             var properties = new BasicProperties { ContentType = "application/json", DeliveryMode = DeliveryModes.Transient };
+            if (activity?.Id is { } traceParent)
+                properties.Headers = new Dictionary<string, object?> { [ServiceTelemetry.TraceParentHeader] = traceParent };
             await channel.BasicPublishAsync(
                 QuoteTopology.InterestExchange, "interest", mandatory: false, properties, body, cancellationToken);
+            QuotesTelemetry.Service.OutboxPublished(QuoteTopology.InterestExchange);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            activity.Fail(exception);
             await ResetAsync();
             throw;
         }

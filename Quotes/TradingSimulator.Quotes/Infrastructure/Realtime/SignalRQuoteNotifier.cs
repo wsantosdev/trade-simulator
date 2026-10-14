@@ -2,6 +2,7 @@ using TradingSimulator.Quotes.Processors.QuoteUpdates;
 using Microsoft.AspNetCore.SignalR;
 using TradingSimulator.Quotes.Common;
 using TradingSimulator.Quotes.Domain.ValueObjects;
+using TradingSimulator.Quotes.Infrastructure.Telemetry;
 
 namespace TradingSimulator.Quotes.Infrastructure.Realtime;
 
@@ -16,6 +17,7 @@ public sealed class SignalRQuoteNotifier(IHubContext<QuotesHub> hub, ILogger<Sig
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            QuotesTelemetry.PushFailed();
             logger.LogWarning(exception, "Could not push the quote of {Ticker}.", quote.Ticker);
         }
     }

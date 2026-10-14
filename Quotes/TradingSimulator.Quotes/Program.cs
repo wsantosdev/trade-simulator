@@ -1,3 +1,4 @@
+using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Quotes.Common;
 using TradingSimulator.Quotes.Features.GetLatestQuote;
 using TradingSimulator.Quotes.Infrastructure.Messaging;
@@ -5,9 +6,12 @@ using TradingSimulator.Quotes.Processors.QuoteInterest;
 using TradingSimulator.Quotes.Processors.QuoteUpdates;
 using TradingSimulator.Quotes.Infrastructure.Realtime;
 using TradingSimulator.Quotes.Infrastructure.Serialization;
+using TradingSimulator.Quotes.Infrastructure.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
+builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, QuotesTelemetry.Service);
+builder.Services.AddHealthChecks().AddRabbitMqProbe();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     foreach (var converter in QuoteJson.Options.Converters)
@@ -37,6 +41,7 @@ app.Use(async (context, next) =>
     if (string.IsNullOrWhiteSpace(correlationId))
         correlationId = Guid.CreateVersion7().ToString("D");
     context.Response.Headers["X-Correlation-Id"] = correlationId;
+    System.Diagnostics.Activity.Current?.SetTag("correlation.id", correlationId);
     await next();
 });
 app.UseCors();
@@ -44,6 +49,7 @@ app.UseCors();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
+app.MapTradingSimulatorHealth();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGetLatestQuoteEndpoint();
 app.MapHub<QuotesHub>(QuotesHub.Route);

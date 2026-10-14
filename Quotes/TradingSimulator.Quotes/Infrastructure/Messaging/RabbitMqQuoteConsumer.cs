@@ -2,6 +2,8 @@ using TradingSimulator.Quotes.Processors.QuoteUpdates;
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.Quotes.Infrastructure.Telemetry;
 using TradingSimulator.Quotes.Common;
 using TradingSimulator.Quotes.Infrastructure.Serialization;
 
@@ -62,15 +64,20 @@ public sealed class RabbitMqQuoteConsumer(
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
+            using var activity = QuotesTelemetry.Service.StartConsumer(
+                QuoteTopology.QuoteQueue, ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers));
             try
             {
                 var result = await processor.ProcessAsync(
                     Encoding.UTF8.GetString(delivery.Body.Span), QuoteJson.Options, stoppingToken);
                 if (result.IsError)
                     logger.LogWarning("Dropped a malformed quote message.");
+                QuotesTelemetry.Service.MessageConsumed(QuoteTopology.QuoteQueue, result.IsError ? "dropped" : "processed");
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                activity.Fail(exception);
+                QuotesTelemetry.Service.MessageConsumed(QuoteTopology.QuoteQueue, "failed");
                 logger.LogError(exception, "Quote message could not be processed.");
             }
         };
