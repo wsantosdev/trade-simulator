@@ -27,6 +27,7 @@ services:
       ConnectionStrings__Accounts: Host=postgres;Port=5432;Database=tradingsimulator;Username=account;Password=account-local;Search Path=account
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
       OfferBook__BaseUrl: http://tradingsimulator-offerbook:8080
+    stop_grace_period: 40s
     ports:
       - "8080:8080"
     depends_on:

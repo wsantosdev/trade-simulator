@@ -18,6 +18,8 @@ using TradingSimulator.Commons.Telemetry;
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Accounts");
 builder.Services.AddOpenApi();
+// Must exceed the longest drain in the workers; compose gives the container a bit more (stop_grace_period).
+builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(30));
 builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, AccountTelemetry.Service);
 builder.Services.AddHealthChecks()
     .AddProbe("postgres", (sp, ct) => sp.GetRequiredService<PostgresAccountStore>().PingAsync(ct))
