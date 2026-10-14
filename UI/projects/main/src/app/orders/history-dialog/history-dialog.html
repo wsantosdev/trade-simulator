@@ -1,0 +1,39 @@
+<div class="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/50 p-4 cursor-pointer" (click)="closed.emit()">
+  <div role="dialog" aria-modal="true" aria-labelledby="history-title" tabindex="-1"
+    class="cursor-default flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-lg bg-white p-6 shadow-xl"
+    (click)="$event.stopPropagation()">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h2 id="history-title" class="text-lg font-semibold text-slate-900">Histórico da ordem</h2>
+        <p class="font-mono text-xs text-slate-600">{{ order().id }}</p>
+      </div>
+      <button type="button" aria-label="Fechar"
+        class="rounded p-1 text-slate-600 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+        (click)="closed.emit()">✕</button>
+    </div>
+
+    <p class="text-sm" role="status" aria-live="polite">
+      @if (loading()) { <span class="text-slate-600">Carregando…</span> }
+      @if (errorMessage()) { <span class="text-red-600">{{ errorMessage() }}</span> }
+    </p>
+
+    <ol class="flex flex-col gap-3">
+      @for (entry of entries(); track entry.sequence) {
+        <li class="rounded-md border border-slate-200 p-3">
+          <div class="flex justify-between text-sm">
+            <span class="font-medium text-slate-900">{{ entry.sequence }}. {{ entry.eventType }}</span>
+            <span class="text-slate-600">{{ entry.occurredAt | date: 'dd/MM/yyyy HH:mm:ss.SSS' }}</span>
+          </div>
+          @if (details(entry).length > 0) {
+            <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-700">
+              @for (detail of details(entry); track detail.label) {
+                <dt class="text-slate-500">{{ detail.label }}</dt>
+                <dd>{{ detail.value }}</dd>
+              }
+            </dl>
+          }
+        </li>
+      }
+    </ol>
+  </div>
+</div>

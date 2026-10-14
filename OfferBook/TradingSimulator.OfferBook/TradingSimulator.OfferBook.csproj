@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <RootNamespace>TradingSimulator.OfferBook</RootNamespace>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10"/>
+        <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
+        <ProjectReference Include="..\..\Shared\TradingSimulator.Commons\TradingSimulator.Commons.csproj" />
+        <Using Include="TradingSimulator.Commons" />
+        <PackageReference Include="Moonad" Version="5.5.1" />
+        <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
+    </ItemGroup>
+
+</Project>

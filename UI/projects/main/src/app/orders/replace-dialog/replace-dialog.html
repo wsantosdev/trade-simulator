@@ -1,0 +1,30 @@
+<div class="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/50 p-4 cursor-pointer" (click)="closed.emit()">
+  <form role="dialog" aria-modal="true" aria-labelledby="replace-title" tabindex="-1"
+    class="cursor-default flex w-full max-w-md flex-col gap-4 rounded-lg bg-white p-6 shadow-xl"
+    (click)="$event.stopPropagation()" (ngSubmit)="confirm()">
+    <h2 id="replace-title" class="text-lg font-semibold text-slate-900">Alterar ordem {{ order().ticker }}</h2>
+
+    <div class="flex flex-col gap-1">
+      <label for="replace-quantity" class="text-sm font-medium text-slate-700">Quantidade (restante)</label>
+      <input id="replace-quantity" name="quantity" type="number" disabled [value]="order().remainingQuantity"
+        class="rounded-md border border-slate-300 bg-slate-100 px-3 py-2" />
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <label for="replace-price" class="text-sm font-medium text-slate-700">Preço limite</label>
+      <input id="replace-price" name="price" type="text" appMoneyMask
+        class="rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+        [ngModel]="price()" (ngModelChange)="price.set($event)" />
+    </div>
+
+    <p class="text-sm text-red-600" role="alert">{{ errorMessage() }}</p>
+    <div class="flex justify-end gap-2">
+      <button type="button"
+        class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-600"
+        (click)="closed.emit()">Voltar</button>
+      <button type="submit"
+        class="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:opacity-60"
+        [disabled]="busy()">{{ busy() ? 'Enviando…' : 'Enviar alteração' }}</button>
+    </div>
+  </form>
+</div>

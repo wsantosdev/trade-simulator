@@ -1,0 +1,287 @@
+<main class="min-h-screen bg-[#f6f8f7] text-slate-900">
+  <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
+    <app-main-menu subtitle="Painel da conta">
+      <span class="hidden items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 sm:inline-flex">
+        <span class="size-2 rounded-full bg-emerald-500"></span>
+        Ambiente de simulação
+      </span>
+    </app-main-menu>
+
+    <header class="flex flex-col gap-5 py-8 sm:flex-row sm:items-end sm:justify-between lg:py-10">
+      <div>
+        <p class="mb-2 text-sm font-semibold text-emerald-700">VISÃO GERAL</p>
+        <h1 class="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">Sua conta corrente</h1>
+        <p class="mt-2 max-w-xl text-sm leading-6 text-slate-600 sm:text-base">
+          Consulte seu saldo e movimente recursos para suas operações de trading.
+        </p>
+      </div>
+      <div class="flex flex-col gap-2 sm:min-w-80">
+        @if (account; as current) {
+          <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Conta selecionada</span>
+          <div class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+            <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500">
+              <svg viewBox="0 0 24 24" fill="none" class="size-4" aria-hidden="true">
+                <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M8 9h8M8 13h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <code class="min-w-0 flex-1 truncate text-xs text-slate-600">{{ current.accountId }}</code>
+            <button
+              class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-emerald-600"
+              type="button"
+              aria-label="Copiar identificador da conta"
+              title="Copiar identificador"
+              (click)="copyAccountId()"
+            >
+              <svg viewBox="0 0 24 24" fill="none" class="size-4" aria-hidden="true">
+                <rect x="8" y="8" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" stroke="currentColor" stroke-width="1.7"/>
+              </svg>
+            </button>
+          </div>
+        } @else {
+          <button
+            class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-wait disabled:opacity-60"
+            type="button"
+            (click)="createAccount()"
+            [disabled]="busy"
+          >
+            @if (busy) {
+              <span class="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+              Abrindo conta...
+            } @else {
+              <svg viewBox="0 0 24 24" fill="none" class="size-4" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Abrir conta corrente
+            }
+          </button>
+        }
+      </div>
+    </header>
+
+    <section class="mb-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm" aria-label="Abrir ou carregar conta">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div class="max-w-sm">
+          <h2 class="text-sm font-bold text-slate-900">Acessar conta</h2>
+          <p class="mt-1 text-sm text-slate-500">Abra uma nova conta ou informe um identificador existente.</p>
+        </div>
+        <div class="flex w-full flex-col gap-2 sm:flex-row lg:max-w-2xl">
+          <button
+            class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-700 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-emerald-700 disabled:opacity-50"
+            type="button"
+            (click)="createAccount()"
+            [disabled]="busy"
+          >
+            Abrir nova conta
+          </button>
+          <form class="flex min-w-0 flex-1 gap-2" (ngSubmit)="loadAccount()">
+            <label class="sr-only" for="accountId">Identificador da conta existente</label>
+            <input
+              class="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-600/10"
+              id="accountId"
+              name="accountId"
+              [(ngModel)]="accountIdInput"
+              placeholder="Cole o identificador da conta"
+              autocomplete="off"
+            />
+            <button
+              class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+              type="submit"
+              [disabled]="busy || !accountIdInput.trim()"
+            >
+              Carregar
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    @if (errorMessage) {
+      <div class="mb-6 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3.5 text-sm text-rose-800" role="alert">
+        <svg viewBox="0 0 24 24" fill="none" class="mt-0.5 size-5 shrink-0" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M12 8v4m0 4h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <p>{{ errorMessage }}</p>
+      </div>
+    }
+    @if (successMessage) {
+      <div class="mb-6 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 text-sm font-medium text-emerald-900" role="status" aria-live="polite">
+        <svg viewBox="0 0 24 24" fill="none" class="size-5 shrink-0" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>
+          <path d="m8.5 12 2.2 2.2 4.8-4.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="flex-1">{{ successMessage }}</span>
+        <button type="button" class="ml-auto -mr-1 shrink-0 rounded-md p-1 text-emerald-800 hover:bg-emerald-100" aria-label="Fechar mensagem" (click)="dismissSuccess()">
+          <svg viewBox="0 0 24 24" fill="none" class="size-5" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    }
+
+    @if (account; as current) {
+      <section class="mb-6 grid gap-6 lg:grid-cols-[1.55fr_1fr]" aria-label="Resumo do saldo">
+        <article class="relative overflow-hidden rounded-lg bg-slate-950 p-6 text-white shadow-lg shadow-slate-900/10">
+          <div class="pointer-events-none absolute -right-16 -top-24 size-72 rounded-full border border-white/10"></div>
+          <div class="pointer-events-none absolute -right-4 -top-12 size-48 rounded-full border border-white/10"></div>
+          <div class="relative flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-slate-300">Saldo disponível</p>
+              <p class="mt-3 text-4xl font-bold tracking-tight sm:text-5xl">{{ current.availableBalance | currency:'USD':'symbol':'1.2-2' }}</p>
+              <p class="mt-3 text-sm text-slate-400">Disponível para saques e novas ordens</p>
+            </div>
+            <span class="grid size-11 shrink-0 place-items-center rounded-xl bg-white/10 text-emerald-300">
+              <svg viewBox="0 0 24 24" fill="none" class="size-5" aria-hidden="true">
+                <path d="M4 7.5h16v11H4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                <path d="M4 10h16M8 15h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M7 7.5V5h13v2.5" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              </svg>
+            </span>
+          </div>
+          <div class="relative mt-8 border-t border-white/10 pt-5">
+            <div class="mb-2 flex items-center justify-between text-xs text-slate-400">
+              <span>Composição do saldo</span>
+              <span>{{ current.availableBalance + current.provisionedBalance | currency:'USD':'symbol':'1.2-2' }} total</span>
+            </div>
+            <div class="flex h-2 overflow-hidden rounded-full bg-white/10" role="img" [attr.aria-label]="'Saldo disponível ' + (current.availableBalance | currency:'USD') + ', provisionado ' + (current.provisionedBalance | currency:'USD')">
+              <span class="h-full bg-emerald-400 transition-all" [style.width.%]="availableBalanceRatio"></span>
+              <span class="h-full bg-amber-300 transition-all" [style.width.%]="provisionedBalanceRatio"></span>
+            </div>
+            <div class="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-300">
+              <span class="inline-flex items-center gap-2"><span class="size-2 rounded-full bg-emerald-400"></span>Disponível</span>
+              <span class="inline-flex items-center gap-2"><span class="size-2 rounded-full bg-amber-300"></span>Provisionado para ordens</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="flex flex-col justify-between rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div>
+            <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-700">
+              <svg viewBox="0 0 24 24" fill="none" class="size-5" aria-hidden="true">
+                <path d="M4 8h16v11H4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                <path d="M4 11h16M8 15h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M8 8V5h12v3" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <p class="mt-5 text-sm font-medium text-slate-500">Valor provisionado</p>
+            <p class="mt-2 text-3xl font-bold tracking-tight text-slate-900">{{ current.provisionedBalance | currency:'USD':'symbol':'1.2-2' }}</p>
+          </div>
+          <p class="mt-5 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-500">
+            Reservado para ordens de compra. Esse valor não está disponível para saque.
+          </p>
+        </article>
+      </section>
+
+      <section aria-labelledby="operations-title">
+        <div class="mb-4">
+          <h2 class="text-xl font-bold tracking-tight text-slate-950" id="operations-title">Movimentar conta</h2>
+          <p class="mt-1 text-sm text-slate-500">Escolha uma operação. Os valores são informados em dólares americanos (USD).</p>
+        </div>
+
+        <div class="grid gap-6 lg:grid-cols-2">
+          <form class="flex flex-col rounded-lg border border-slate-200 bg-white p-6 shadow-sm" (ngSubmit)="submitOperation('deposits')">
+            <div class="flex items-start justify-between">
+              <span class="grid size-11 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+                <svg viewBox="0 0 24 24" fill="none" class="size-5" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">Entrada</span>
+            </div>
+            <h3 class="mt-5 text-base font-bold text-slate-900">Depositar</h3>
+            <p class="mt-1 min-h-10 text-sm leading-5 text-slate-500">Adicione fundos ao saldo disponível da conta.</p>
+            <label class="mb-2 mt-5 text-xs font-semibold text-slate-700" for="deposit">Valor do depósito</label>
+            <div class="relative">
+              <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm font-medium text-slate-400">$</span>
+              <input
+                class="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-8 pr-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-600/10"
+                id="deposit"
+                name="deposit"
+                type="text"
+                appMoneyMask
+                [(ngModel)]="amounts.deposit"
+                required
+              />
+            </div>
+            <p class="mt-2 text-xs text-slate-400">Mínimo $0,01 · Máximo $1.000.000 por depósito</p>
+            <button
+              class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+              type="submit"
+              [disabled]="busy || amounts.deposit <= 0 || amounts.deposit > 1000000"
+            >
+              Depositar fundos
+            </button>
+          </form>
+
+          <form class="flex flex-col rounded-lg border border-slate-200 bg-white p-6 shadow-sm" (ngSubmit)="submitOperation('withdrawals')">
+            <div class="flex items-start justify-between">
+              <span class="grid size-11 place-items-center rounded-xl bg-sky-50 text-sky-700">
+                <svg viewBox="0 0 24 24" fill="none" class="size-5" aria-hidden="true">
+                  <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span class="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-800">Saída</span>
+            </div>
+            <h3 class="mt-5 text-base font-bold text-slate-900">Sacar</h3>
+            <p class="mt-1 min-h-10 text-sm leading-5 text-slate-500">Retire até o limite do saldo disponível.</p>
+            <label class="mb-2 mt-5 text-xs font-semibold text-slate-700" for="withdrawal">Valor do saque</label>
+            <div class="relative">
+              <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm font-medium text-slate-400">$</span>
+              <input
+                class="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-8 pr-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-600/10"
+                id="withdrawal"
+                name="withdrawal"
+                type="text"
+                appMoneyMask
+                [(ngModel)]="amounts.withdrawal"
+                required
+              />
+            </div>
+            <p class="mt-2 text-xs text-slate-400">Disponível para saque: {{ current.availableBalance | currency:'USD':'symbol':'1.2-2' }}</p>
+            <button
+              class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              type="submit"
+              [disabled]="busy || amounts.withdrawal <= 0 || amounts.withdrawal > current.availableBalance"
+            >
+              Solicitar saque
+            </button>
+          </form>
+
+        </div>
+        <p class="mt-4 flex items-start gap-2 text-xs leading-5 text-slate-500">
+          <svg viewBox="0 0 24 24" fill="none" class="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true">
+            <path d="M12 3 2.8 19h18.4L12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+            <path d="M12 9v4m0 3h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+          Valores provisionados por ordens ficam indisponíveis para saque e não fazem parte do saldo disponível.
+        </p>
+      </section>
+    } @else {
+      <section class="grid min-h-80 place-items-center rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+        <div class="max-w-md">
+          <span class="mx-auto grid size-14 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+            <svg viewBox="0 0 24 24" fill="none" class="size-7" aria-hidden="true">
+              <path d="M3.5 9h17v10h-17z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M3.5 12h17M7 9V6h14v3" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M8 15.5h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <h2 class="mt-5 text-lg font-bold text-slate-900">Comece pela sua conta</h2>
+          <p class="mt-2 text-sm leading-6 text-slate-500">
+            Abra uma nova conta corrente com saldo inicial de $0,00, ou carregue uma conta existente pelo identificador.
+          </p>
+          <div class="mt-5 inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
+            <span class="size-1.5 rounded-full bg-emerald-500"></span>
+            Sem limite para quantidade de depósitos
+          </div>
+        </div>
+      </section>
+    }
+
+    <footer class="mt-10 border-t border-slate-200 pt-5 text-center text-xs text-slate-400">
+      Trading Simulator · Valores apresentados em USD
+    </footer>
+  </div>
+</main>

@@ -1,0 +1,19 @@
+using TradingSimulator.Portfolio.Application;
+
+namespace TradingSimulator.Portfolio.Infrastructure;
+
+public sealed class PortfolioCommandConsumer(
+    IConfiguration configuration,
+    PortfolioCommandProcessor processor,
+    ILogger<PortfolioCommandConsumer> logger) : RabbitMqConsumerBase(configuration, logger)
+{
+    public const string Exchange = "trading-simulator.portfolio.command";
+    public const string Queue = "trading-simulator.portfolio.asset.commands";
+
+    protected override string ExchangeName => Exchange;
+    protected override string QueueName => Queue;
+    protected override IReadOnlyList<string> RoutingKeys => ["#"];
+
+    protected override Task HandleAsync(string body, CancellationToken cancellationToken) =>
+        processor.ProcessCommandAsync(body, PortfolioJson.Options, cancellationToken);
+}

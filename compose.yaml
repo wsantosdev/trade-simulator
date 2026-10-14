@@ -1,0 +1,166 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: tradingsimulator
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres-local
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tradingsimulator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tradingsimulator-account:
+    image: tradingsimulator-account
+    build:
+      context: .
+      dockerfile: Account/TradingSimulator.Account/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Accounts: Host=postgres;Port=5432;Database=tradingsimulator;Username=account;Password=account-local;Search Path=account
+      RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
+      OfferBook__BaseUrl: http://tradingsimulator-offerbook:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  tradingsimulator-orders:
+    image: tradingsimulator-orders
+    build:
+      context: .
+      dockerfile: Orders/TradingSimulator.Orders/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Orders: Host=postgres;Port=5432;Database=tradingsimulator;Username=orders;Password=orders-local;Search Path=orders
+      RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  tradingsimulator-exchange:
+    image: tradingsimulator-exchange
+    build:
+      context: .
+      dockerfile: Exchange/TradingSimulator.Exchange/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      Simulation__SessionClockOffset: ${EXCHANGE_SESSION_CLOCK_OFFSET:-00:00:00}
+      ConnectionStrings__Exchange: Host=postgres;Port=5432;Database=tradingsimulator;Username=exchange;Password=exchange-local;Search Path=exchange
+      RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
+    ports:
+      - "8083:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  tradingsimulator-quotes:
+    image: tradingsimulator-quotes
+    build:
+      context: .
+      dockerfile: Quotes/TradingSimulator.Quotes/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
+    ports:
+      - "8084:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  tradingsimulator-offerbook:
+    image: tradingsimulator-offerbook
+    build:
+      context: .
+      dockerfile: OfferBook/TradingSimulator.OfferBook/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
+    ports:
+      - "8085:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  tradingsimulator-portfolio:
+    image: tradingsimulator-portfolio
+    build:
+      context: .
+      dockerfile: Portfolio/TradingSimulator.Portfolio/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Portfolio: Host=postgres;Port=5432;Database=tradingsimulator;Username=portfolio;Password=portfolio-local;Search Path=portfolio
+      ConnectionStrings__Redis: redis:6379
+      RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
+    ports:
+      - "8082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: account
+      RABBITMQ_DEFAULT_PASS: account-local
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ui:
+    image: tradingsimulator-ui
+    build:
+      context: UI
+    ports:
+      - "4200:4200"
+      - "4204:4204"
+    depends_on:
+      - tradingsimulator-account
+      - tradingsimulator-orders
+      - tradingsimulator-exchange
+      - tradingsimulator-quotes
+      - tradingsimulator-offerbook
+      - tradingsimulator-portfolio
+
+volumes:
+  postgres-data:

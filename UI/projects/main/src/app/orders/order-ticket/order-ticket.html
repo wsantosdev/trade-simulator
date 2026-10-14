@@ -1,0 +1,171 @@
+<div class="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+<form
+  class="flex flex-1 flex-col gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+  aria-labelledby="ticket-title"
+  (ngSubmit)="submit()"
+>
+  <h2 id="ticket-title" class="text-lg font-semibold text-slate-900">Boleta de negociação</h2>
+
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+    <div class="flex flex-col gap-1">
+      <label for="ticker" class="text-sm font-medium text-slate-700">Ativo</label>
+      <input
+        id="ticker"
+        name="ticker"
+        type="text"
+        maxlength="5"
+        autocomplete="off"
+        placeholder="PETR4"
+        class="rounded-md border px-3 py-2 uppercase focus:outline-none focus:ring-2 focus:ring-emerald-600"
+        [class.border-red-500]="tickerInvalid()"
+        [class.border-slate-300]="!tickerInvalid()"
+        [attr.aria-invalid]="tickerInvalid()"
+        [ngModel]="ticker()"
+        (ngModelChange)="onTickerChanged($event)"
+      />
+    </div>
+
+
+    <div class="flex flex-col gap-1">
+      <label for="side" class="text-sm font-medium text-slate-700">Lado</label>
+      <select
+        id="side"
+        name="side"
+        class="rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+        [ngModel]="side()"
+        (ngModelChange)="side.set($event)"
+      >
+        <option value="Buy">Compra</option>
+        <option value="Sell">Venda</option>
+      </select>
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <label for="type" class="text-sm font-medium text-slate-700">Tipo</label>
+      <select
+        id="type"
+        name="type"
+        class="rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+        [ngModel]="type()"
+        (ngModelChange)="onTypeChanged($event)"
+      >
+        <option value="Limit">Limitada</option>
+        <option value="Market">A mercado</option>
+      </select>
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <label for="quantity" class="text-sm font-medium text-slate-700">Quantidade</label>
+      <input
+        id="quantity"
+        name="quantity"
+        type="number"
+        min="1"
+        step="1"
+        class="rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+        [ngModel]="quantity()"
+        (ngModelChange)="quantity.set($event)"
+      />
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <label for="price" class="text-sm font-medium text-slate-700">Preço limite</label>
+      <input
+        id="price"
+        name="price"
+        type="text"
+        appMoneyMask
+        class="rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-100"
+        [disabled]="type() === 'Market'"
+        [ngModel]="price()"
+        (ngModelChange)="price.set($event)"
+      />
+    </div>
+  </div>
+
+  <div class="flex items-center gap-4">
+    <button
+      type="submit"
+      class="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+      [disabled]="busy()"
+    >
+      {{ busy() ? 'Enviando…' : side() === 'Buy' ? 'Enviar compra' : 'Enviar venda' }}
+    </button>
+    <p class="text-sm" role="status" aria-live="polite">
+      @if (errorMessage()) {
+        <span class="text-red-600">{{ errorMessage() }}</span>
+      } @else if (successMessage()) {
+        <span class="text-emerald-700">{{ successMessage() }}</span>
+      }
+    </p>
+  </div>
+</form>
+
+<aside
+  class="flex w-full flex-col gap-3 rounded-lg border border-slate-200 bg-white p-6 shadow-sm lg:w-[19rem] lg:shrink-0"
+  [class.text-slate-400]="!marketActive()"
+  aria-label="Cotação e livro de ofertas"
+  data-testid="market"
+>
+  <h2 class="text-lg font-semibold" [class.text-slate-900]="marketActive()" [class.text-slate-400]="!marketActive()">Mercado</h2>
+
+  <div class="min-h-6 text-sm" aria-live="polite" data-testid="quote">
+    @if (marketActive() && quotes.quote(); as quote) {
+      <span class="font-semibold tabular-nums text-slate-900" [class]="quotes.flashClass()" data-testid="quote-last">{{ money.format(quote.last) }}</span>
+      @if (quotes.change(); as change) {
+        <span class="ml-1 tabular-nums" [class]="changeColor(change.amount)" data-testid="quote-change">
+          {{ signedMoney.format(change.amount) }} ({{ signedPercent.format(change.percent) }}%)
+        </span>
+      }
+    } @else if (marketActive() && quotes.unavailable()) {
+      <span class="text-slate-500">Cotação indisponível</span>
+    } @else {
+      <span class="font-semibold tabular-nums text-slate-400" data-testid="quote-last">{{ money.format(0) }}</span>
+    }
+  </div>
+
+  <section aria-label="Melhores ofertas do livro" data-testid="book">
+    <div class="flex gap-2">
+      <table class="w-28 shrink-0 table-fixed rounded-md border border-slate-200 bg-white text-xs tabular-nums" data-testid="book-bids">
+        <caption class="px-1 pb-1 text-left font-semibold" [class.text-emerald-800]="marketActive()" [class.text-slate-400]="!marketActive()">Compras</caption>
+        <thead>
+          <tr class="border-b border-slate-200 text-slate-600" [class.text-slate-400]="!marketActive()">
+            <th scope="col" class="w-12 px-1 py-1 text-right font-medium">Qtde</th>
+            <th scope="col" class="w-16 px-1 py-1 text-right font-medium">Preço</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (level of bidRows(); track $index) {
+            <tr class="border-b border-slate-100" data-testid="book-bid-row">
+              <td class="px-1 py-1 text-right" [class.text-slate-400]="!marketActive()">{{ integer.format(level.quantity) }}</td>
+              <td class="px-1 py-1 text-right" [class.text-emerald-800]="marketActive()" [class.text-slate-400]="!marketActive()">{{ money.format(level.price) }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+      <table class="w-28 shrink-0 table-fixed rounded-md border border-slate-200 bg-white text-xs tabular-nums" data-testid="book-asks">
+        <caption class="px-1 pb-1 text-left font-semibold" [class.text-red-800]="marketActive()" [class.text-slate-400]="!marketActive()">Vendas</caption>
+        <thead>
+          <tr class="border-b border-slate-200 text-slate-600" [class.text-slate-400]="!marketActive()">
+            <th scope="col" class="w-16 px-1 py-1 text-left font-medium">Preço</th>
+            <th scope="col" class="w-12 px-1 py-1 text-right font-medium">Qtde</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (level of askRows(); track $index) {
+            <tr class="border-b border-slate-100" data-testid="book-ask-row">
+              <td class="px-1 py-1 text-left" [class.text-red-800]="marketActive()" [class.text-slate-400]="!marketActive()">{{ money.format(level.price) }}</td>
+              <td class="px-1 py-1 text-right" [class.text-slate-400]="!marketActive()">{{ integer.format(level.quantity) }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    @if (marketActive() && book.unavailable()) {
+      <p class="mt-1 text-xs text-slate-500">Livro de ofertas indisponível</p>
+    } @else if (marketActive() && book.frozen()) {
+      <p class="mt-1 text-xs text-amber-700" data-testid="book-frozen">Fora do pregão: livro congelado.</p>
+    }
+  </section>
+</aside>
+</div>

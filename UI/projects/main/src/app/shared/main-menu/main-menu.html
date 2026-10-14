@@ -1,0 +1,62 @@
+<nav class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-5" aria-label="Principal">
+  <div class="flex min-w-0 items-center gap-3">
+    <button
+      type="button"
+      class="grid size-10 shrink-0 place-items-center rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+      aria-label="Menu"
+      aria-controls="main-menu-panel"
+      [attr.aria-expanded]="open()"
+      (click)="open.set(!open())"
+    >
+      <svg viewBox="0 0 24 24" fill="none" class="size-5" aria-hidden="true">
+        <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      </svg>
+    </button>
+    <a class="flex shrink-0 items-center gap-3" routerLink="/" aria-label="Trading Simulator início">
+      <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-700 text-white shadow-sm">
+        <svg viewBox="0 0 24 24" fill="none" class="size-5" aria-hidden="true">
+          <path d="M4 17.5 9 12l3.5 3 7.5-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M15 7h5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span>
+        <span class="block text-sm font-bold tracking-tight text-slate-900">Trading Simulator</span>
+        <span class="block text-xs text-slate-500">{{ subtitle() }}</span>
+      </span>
+    </a>
+  </div>
+  <div class="flex min-w-0 items-center gap-3">
+    <p class="min-w-0 truncate text-right text-xs text-slate-500" data-testid="current-account">
+      @if (account.accountId(); as id) {
+        Conta <code class="font-mono">{{ id }}</code>
+      } @else {
+        Nenhuma conta carregada
+      }
+    </p>
+    <ng-content />
+  </div>
+</nav>
+
+@if (open()) {
+  <div class="fixed inset-0 z-40" (click)="close()" aria-hidden="true"></div>
+  <div
+    id="main-menu-panel"
+    class="absolute left-0 top-12 z-50 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-lg"
+  >
+    <ul class="flex flex-col gap-1">
+      @for (item of items; track item.path) {
+        <li>
+          <a
+            class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            [routerLink]="item.path"
+            routerLinkActive="bg-emerald-50 text-emerald-800 hover:bg-emerald-50 hover:text-emerald-800"
+            ariaCurrentWhenActive="page"
+            (click)="close()"
+          >
+            {{ item.label }}
+          </a>
+        </li>
+      }
+    </ul>
+  </div>
+}

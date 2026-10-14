@@ -1,0 +1,33 @@
+namespace TradingSimulator.Account.Domain;
+
+public interface IAccountError;
+
+public readonly struct InvalidAccountId : IAccountError;
+public readonly struct AccountAlreadyOpened : IAccountError;
+public readonly struct AccountOpeningEventMissing : IAccountError;
+public readonly struct SnapshotAccountMismatch : IAccountError;
+public readonly struct InvalidSnapshotBalance : IAccountError;
+public readonly struct InvalidDepositAmount : IAccountError;
+public readonly struct InvalidWithdrawalAmount : IAccountError;
+public readonly struct WithdrawalExceedsAvailableBalance : IAccountError;
+public readonly struct InvalidReservationAmount : IAccountError;
+public readonly struct ReservationExceedsAvailableBalance : IAccountError;
+public readonly struct InvalidOrderId : IAccountError;
+public readonly struct InvalidReleaseAmount : IAccountError;
+public readonly struct ReleaseExceedsProvisionedBalance : IAccountError;
+public readonly struct InvalidDebitAmount : IAccountError;
+public readonly struct DebitExceedsProvisionedBalance : IAccountError;
+public readonly struct InvalidPersistedRelease : IAccountError;
+public readonly struct InvalidPersistedDebit : IAccountError;
+public readonly struct PriceUnavailable : IAccountError;
+public readonly struct EventAccountMismatch : IAccountError;
+public readonly struct InvalidPersistedDeposit : IAccountError;
+public readonly struct InvalidPersistedWithdrawal : IAccountError;
+public readonly struct InvalidPersistedReservation : IAccountError;
+public readonly struct UnsupportedAccountEvent : IAccountError;
+public readonly struct NegativeAccountBalance : IAccountError;
+public readonly struct AccountBalanceLimitExceeded : IAccountError;
+public readonly struct AccountNotFound : IAccountError;
+public readonly struct AccountAlreadyExists : IAccountError;
+public readonly struct CorruptAccountHistory : IAccountError;
+public readonly struct AccountPersistenceFailure : IAccountError;

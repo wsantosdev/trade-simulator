@@ -1,0 +1,10 @@
+bin/
+obj/
+/packages/
+riderModule.iml
+/_ReSharper.Caches/
+BVBG*.xml
+COTACOES_*.TXT
+
+# JetBrains IDEs
+.idea/
