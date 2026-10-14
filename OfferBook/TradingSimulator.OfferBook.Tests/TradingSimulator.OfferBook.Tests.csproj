@@ -23,6 +23,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\TradingSimulator.OfferBook\TradingSimulator.OfferBook.csproj" />
+        <ProjectReference Include="..\..\Shared\TradingSimulator.Testing\TradingSimulator.Testing.csproj" />
         <Using Include="TradingSimulator.Commons" />
     </ItemGroup>
 
