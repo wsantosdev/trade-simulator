@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moonad;
 using Xunit;
+using TradingSimulator.Account.Common;
 using TradingSimulator.Account.Domain;
 using TradingSimulator.Account.Domain.Enums;
 using TradingSimulator.Account.Domain.ValueObjects;
@@ -112,7 +113,8 @@ public sealed class OrderFundsTests
     public async Task Fill_without_reservation_is_retried_then_discarded()
     {
         var store = new FakeStore { Outcome = OrderFundsOutcome.UnknownOrder };
-        var processor = Processor(store);
+        var metrics = new FakeMetrics();
+        var processor = Processor(store, metrics: metrics);
         var envelopeId = Guid.CreateVersion7();
         var orderId = OrderId.New();
 
@@ -121,6 +123,20 @@ public sealed class OrderFundsTests
         await processor.SettleFillAsync(envelopeId, orderId, 1, 2m, true, default);
 
         Assert.True(store.DebitFinal);
+        Assert.Equal(1, metrics.Abandoned);
+        Assert.Equal(OrderFundsProcessor.MaxFillAttempts - 1, metrics.Settlements.Count(s => s == "fill:retry"));
+    }
+
+    [Fact]
+    public async Task Reservation_result_is_recorded_without_identifiers()
+    {
+        var metrics = new FakeMetrics();
+        await Processor(new FakeStore(), metrics: metrics)
+            .ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Sell, OrderType.Limit, 10, 5m), default);
+        await Processor(new FakeStore(), metrics: metrics)
+            .ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Limit, 10, 5m), default);
+
+        Assert.Equal(["ignored_not_buy", "reserved"], metrics.Reservations);
     }
 
     [Fact]
@@ -137,8 +153,20 @@ public sealed class OrderFundsTests
         Assert.Equal(10m, back.Event.ResultValue.Amount);
     }
 
-    private static OrderFundsProcessor Processor(FakeStore store, decimal? ask = 1m) =>
-        new(store, new FakeOfferBook(ask), NullLogger<OrderFundsProcessor>.Instance);
+    private static OrderFundsProcessor Processor(FakeStore store, decimal? ask = 1m, FakeMetrics? metrics = null) =>
+        new(store, new FakeOfferBook(ask), metrics ?? new FakeMetrics(), NullLogger<OrderFundsProcessor>.Instance);
+
+    private sealed class FakeMetrics : IAccountMetrics
+    {
+        public List<string> Reservations { get; } = [];
+        public List<string> Settlements { get; } = [];
+        public int Abandoned { get; private set; }
+
+        public void OperationCompleted(string operation, decimal? amount, IAccountError? error) { }
+        public void ReservationCompleted(string result, TimeSpan duration) => Reservations.Add(result);
+        public void SettlementCompleted(string type, string result) => Settlements.Add($"{type}:{result}");
+        public void SettlementAbandoned(string type) => Abandoned++;
+    }
 
     private static OrderSubmission Submission(OrderSide side, OrderType type, long quantity, decimal? price) =>
         new(OrderId.New(), Guid.CreateVersion7(), "PETR4", side, type, quantity, price);

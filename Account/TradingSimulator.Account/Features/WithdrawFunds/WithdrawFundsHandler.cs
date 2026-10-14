@@ -1,4 +1,5 @@
 using Moonad;
+using TradingSimulator.Account.Common;
 using TradingSimulator.Account.Domain;
 using TradingSimulator.Account.Domain.ValueObjects;
 using TradingSimulator.Account.Features.Shared;
@@ -11,7 +12,7 @@ public interface IWithdrawFunds
     Task<Result<Domain.Entities.Account, IAccountError>> ExecuteAsync(Guid accountId, decimal amount, CancellationToken cancellationToken);
 }
 
-public sealed class WithdrawFundsHandler(IAccountStore store) : IWithdrawFunds
+public sealed class WithdrawFundsHandler(IAccountStore store, IAccountMetrics metrics) : IWithdrawFunds
 {
     public async Task<Result<Domain.Entities.Account, IAccountError>> ExecuteAsync(Guid accountId, decimal amount, CancellationToken cancellationToken)
     {
@@ -19,6 +20,8 @@ public sealed class WithdrawFundsHandler(IAccountStore store) : IWithdrawFunds
         if (id.IsError)
             return Result<Domain.Entities.Account, IAccountError>.Error(id.ErrorValue);
 
-        return await store.ExecuteAsync(id.ResultValue, current => current.Withdraw(amount), cancellationToken);
+        var result = await store.ExecuteAsync(id.ResultValue, current => current.Withdraw(amount), cancellationToken);
+        metrics.OperationCompleted("withdraw", amount, result.IsError ? result.ErrorValue : null);
+        return result;
     }
 }

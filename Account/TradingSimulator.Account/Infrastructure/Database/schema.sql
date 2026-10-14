@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS event_outbox (
     published_at TIMESTAMPTZ NULL
 );
 
+ALTER TABLE event_outbox ADD COLUMN IF NOT EXISTS traceparent TEXT NULL;
+
 CREATE INDEX IF NOT EXISTS ix_event_outbox_pending_position
     ON event_outbox(position)
     WHERE published_at IS NULL;
@@ -63,6 +65,8 @@ CREATE TABLE IF NOT EXISTS response_outbox (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     published_at TIMESTAMPTZ NULL
 );
+
+ALTER TABLE response_outbox ADD COLUMN IF NOT EXISTS traceparent TEXT NULL;
 
 CREATE INDEX IF NOT EXISTS ix_response_outbox_pending_position
     ON response_outbox(position)

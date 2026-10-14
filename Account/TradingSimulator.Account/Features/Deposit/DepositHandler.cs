@@ -1,4 +1,5 @@
 using Moonad;
+using TradingSimulator.Account.Common;
 using TradingSimulator.Account.Domain;
 using TradingSimulator.Account.Domain.ValueObjects;
 using TradingSimulator.Account.Features.Shared;
@@ -11,7 +12,7 @@ public interface IDeposit
     Task<Result<Domain.Entities.Account, IAccountError>> ExecuteAsync(Guid accountId, decimal amount, CancellationToken cancellationToken);
 }
 
-public sealed class DepositHandler(IAccountStore store) : IDeposit
+public sealed class DepositHandler(IAccountStore store, IAccountMetrics metrics) : IDeposit
 {
     public async Task<Result<Domain.Entities.Account, IAccountError>> ExecuteAsync(Guid accountId, decimal amount, CancellationToken cancellationToken)
     {
@@ -19,6 +20,8 @@ public sealed class DepositHandler(IAccountStore store) : IDeposit
         if (id.IsError)
             return Result<Domain.Entities.Account, IAccountError>.Error(id.ErrorValue);
 
-        return await store.ExecuteAsync(id.ResultValue, current => current.Deposit(amount), cancellationToken);
+        var result = await store.ExecuteAsync(id.ResultValue, current => current.Deposit(amount), cancellationToken);
+        metrics.OperationCompleted("deposit", amount, result.IsError ? result.ErrorValue : null);
+        return result;
     }
 }

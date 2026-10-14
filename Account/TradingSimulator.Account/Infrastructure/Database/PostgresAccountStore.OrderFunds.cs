@@ -1,3 +1,4 @@
+using TradingSimulator.Account.Infrastructure.Telemetry;
 using System.Text.Json;
 using Moonad;
 using Npgsql;
@@ -229,7 +230,7 @@ public sealed partial class PostgresAccountStore
     async Task<IReadOnlyList<PendingResponse>> IResponseOutbox.ReadPendingAsync(int limit, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT position, routing_key, payload::text
+            SELECT position, routing_key, payload::text, traceparent
             FROM response_outbox
             WHERE published_at IS NULL
             ORDER BY position
@@ -241,7 +242,7 @@ public sealed partial class PostgresAccountStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var pending = new List<PendingResponse>();
         while (await reader.ReadAsync(cancellationToken))
-            pending.Add(new PendingResponse(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
+            pending.Add(new PendingResponse(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3)));
         return pending;
     }
 
@@ -266,10 +267,11 @@ public sealed partial class PostgresAccountStore
         FundsReservationResponse response,
         CancellationToken cancellationToken)
     {
-        const string sql = "INSERT INTO response_outbox(routing_key, payload) VALUES(@routingKey, @payload::jsonb);";
+        const string sql = "INSERT INTO response_outbox(routing_key, payload, traceparent) VALUES(@routingKey, @payload::jsonb, @traceParent);";
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("routingKey", routingKey);
         command.Parameters.AddWithValue("payload", JsonSerializer.Serialize(response, AccountJson.Options));
+        command.Parameters.AddWithValue("traceParent", (object?)AccountTelemetry.CurrentTraceParent() ?? DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

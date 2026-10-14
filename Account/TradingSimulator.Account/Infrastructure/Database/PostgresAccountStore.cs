@@ -1,3 +1,4 @@
+using TradingSimulator.Account.Infrastructure.Telemetry;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -72,7 +73,9 @@ public sealed partial class PostgresAccountStore(
         Func<Domain.Entities.Account, Result<Domain.Entities.Account, IAccountError>> operation,
         CancellationToken cancellationToken)
     {
+        var waitStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         await _gate.WaitAsync(cancellationToken);
+        AccountTelemetry.GateWait(System.Diagnostics.Stopwatch.GetElapsedTime(waitStarted));
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -110,7 +113,7 @@ public sealed partial class PostgresAccountStore(
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         const string sql = """
-            SELECT position, event_type, payload::text
+            SELECT position, event_type, payload::text, traceparent
             FROM event_outbox
             WHERE published_at IS NULL
             ORDER BY position
@@ -121,7 +124,7 @@ public sealed partial class PostgresAccountStore(
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var pending = new List<PendingEvent>();
         while (await reader.ReadAsync(cancellationToken))
-            pending.Add(new PendingEvent(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
+            pending.Add(new PendingEvent(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3)));
         return pending;
     }
 
@@ -288,13 +291,14 @@ public sealed partial class PostgresAccountStore(
             lastPosition = position;
 
             const string insertOutboxSql = """
-                INSERT INTO event_outbox(position, event_type, payload)
-                VALUES(@position, @eventType, @payload::jsonb);
+                INSERT INTO event_outbox(position, event_type, payload, traceparent)
+                VALUES(@position, @eventType, @payload::jsonb, @traceParent);
                 """;
             await using var insertOutbox = new NpgsqlCommand(insertOutboxSql, connection, transaction);
             insertOutbox.Parameters.AddWithValue("position", lastPosition);
             insertOutbox.Parameters.AddWithValue("eventType", eventType);
             insertOutbox.Parameters.AddWithValue("payload", payload);
+            insertOutbox.Parameters.AddWithValue("traceParent", (object?)AccountTelemetry.CurrentTraceParent() ?? DBNull.Value);
             await insertOutbox.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -352,8 +356,8 @@ public sealed partial class PostgresAccountStore(
                 RETURNING position, event_type, payload
             ),
             inserted_outbox AS (
-                INSERT INTO event_outbox(position, event_type, payload)
-                SELECT position, event_type, payload
+                INSERT INTO event_outbox(position, event_type, payload, traceparent)
+                SELECT position, event_type, payload, @traceParent::text
                 FROM inserted_event
                 RETURNING position
             )
@@ -363,6 +367,7 @@ public sealed partial class PostgresAccountStore(
         command.Parameters.AddWithValue("accountId", account.Id.Guid);
         command.Parameters.AddWithValue("eventType", eventType);
         command.Parameters.AddWithValue("payload", payload);
+        command.Parameters.AddWithValue("traceParent", (object?)AccountTelemetry.CurrentTraceParent() ?? DBNull.Value);
         var position = await command.ExecuteScalarAsync(cancellationToken);
         return position is long
             ? true

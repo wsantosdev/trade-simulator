@@ -1,5 +1,6 @@
 using System.Text;
 using RabbitMQ.Client;
+using TradingSimulator.Account.Infrastructure.Telemetry;
 
 namespace TradingSimulator.Account.Infrastructure.Messaging;
 
@@ -12,6 +13,7 @@ public sealed class RabbitMqEventPublisher(IConfiguration configuration) : IEven
     public async Task PublishAsync(PendingEvent pendingEvent, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
+        using var activity = AccountTelemetry.StartPublisher("account.events", pendingEvent.EventType, pendingEvent.TraceParent);
         try
         {
             if (_channel is null)
@@ -27,6 +29,8 @@ public sealed class RabbitMqEventPublisher(IConfiguration configuration) : IEven
 
             var body = Encoding.UTF8.GetBytes(pendingEvent.Payload);
             var properties = new BasicProperties { ContentType = "application/json", DeliveryMode = DeliveryModes.Persistent };
+            if (activity?.Id is { } traceParent)
+                properties.Headers = new Dictionary<string, object?> { [AccountTelemetry.TraceParentHeader] = traceParent };
             await _channel.BasicPublishAsync(
                 exchange: "account.events",
                 routingKey: pendingEvent.EventType,
@@ -34,6 +38,12 @@ public sealed class RabbitMqEventPublisher(IConfiguration configuration) : IEven
                 basicProperties: properties,
                 body: body,
                 cancellationToken: cancellationToken);
+            AccountTelemetry.OutboxPublished("account.events");
+        }
+        catch (Exception exception)
+        {
+            activity.Fail(exception);
+            throw;
         }
         finally
         {

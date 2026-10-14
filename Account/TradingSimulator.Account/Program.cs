@@ -1,4 +1,10 @@
 using Microsoft.AspNetCore.Diagnostics;
+using Npgsql;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using TradingSimulator.Account.Common;
 using TradingSimulator.Account.Features.Shared;
 using TradingSimulator.Account.Processors.OrderFunds;
 using TradingSimulator.Account.Domain.Entities;
@@ -10,10 +16,29 @@ using TradingSimulator.Account.Features.WithdrawFunds;
 using TradingSimulator.Account.Infrastructure.Database;
 using TradingSimulator.Account.Infrastructure.Http;
 using TradingSimulator.Account.Infrastructure.Messaging;
+using TradingSimulator.Account.Infrastructure.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Accounts");
 builder.Services.AddOpenApi();
+var telemetry = builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(AccountTelemetry.Name))
+    .WithTracing(tracing => tracing
+        .AddSource(AccountTelemetry.Name)
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddNpgsql())
+    .WithMetrics(metrics => metrics
+        .AddMeter(AccountTelemetry.Name)
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation())
+    .WithLogging();
+if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+    telemetry.UseOtlpExporter();
+builder.Services.AddHealthChecks()
+    .AddCheck<PostgresHealthCheck>("postgres", tags: ["ready"])
+    .AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: ["ready"]);
+builder.Services.AddHostedService<OutboxBacklogMonitor>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:4200").AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddSingleton(sp =>
@@ -23,6 +48,7 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<ILogger<PostgresAccountStore>>());
 });
 builder.Services.AddSingleton<IAccountStore>(sp => sp.GetRequiredService<PostgresAccountStore>());
+builder.Services.AddSingleton<IAccountMetrics, AccountMetrics>();
 builder.Services.AddSingleton<IDeposit, DepositHandler>();
 builder.Services.AddSingleton<IWithdrawFunds, WithdrawFundsHandler>();
 builder.Services.AddSingleton<IReserveFunds, ReserveFundsHandler>();
@@ -76,6 +102,7 @@ app.Use(async (context, next) =>
     if (string.IsNullOrWhiteSpace(correlationId))
         correlationId = Guid.CreateVersion7().ToString("D");
     context.Response.Headers["X-Correlation-Id"] = correlationId;
+    System.Diagnostics.Activity.Current?.SetTag("correlation.id", correlationId);
     await next();
 });
 app.UseCors();
@@ -83,6 +110,8 @@ app.UseCors();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
+app.MapHealthChecks("/health/live", new() { Predicate = _ => false });
+app.MapHealthChecks("/health/ready", new() { Predicate = check => check.Tags.Contains("ready") });
 app.MapOpenAccountEndpoint();
 app.MapGetAccountEndpoint();
 app.MapDepositEndpoint();
