@@ -1,4 +1,4 @@
-using TradingSimulator.Account.Infrastructure.Telemetry;
+using TradingSimulator.Commons.Telemetry;
 using System.Text.Json;
 using Moonad;
 using Npgsql;
@@ -271,7 +271,7 @@ public sealed partial class PostgresAccountStore
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("routingKey", routingKey);
         command.Parameters.AddWithValue("payload", JsonSerializer.Serialize(response, AccountJson.Options));
-        command.Parameters.AddWithValue("traceParent", (object?)AccountTelemetry.CurrentTraceParent() ?? DBNull.Value);
+        command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

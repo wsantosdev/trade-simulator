@@ -1,9 +1,13 @@
-using TradingSimulator.Account.Infrastructure.Database;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-namespace TradingSimulator.Account.Infrastructure.Telemetry;
+namespace TradingSimulator.Commons.Telemetry;
 
 // Polls the backlog on a timer so metric collection never touches the database.
-public sealed class OutboxBacklogMonitor(PostgresAccountStore store, ILogger<OutboxBacklogMonitor> logger) : BackgroundService
+public sealed class OutboxBacklogMonitor(
+    ServiceTelemetry telemetry,
+    IOutboxBacklogReader reader,
+    ILogger<OutboxBacklogMonitor> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(15);
 
@@ -14,7 +18,7 @@ public sealed class OutboxBacklogMonitor(PostgresAccountStore store, ILogger<Out
         {
             try
             {
-                AccountTelemetry.UpdateBacklog(await store.ReadOutboxBacklogAsync(stoppingToken));
+                telemetry.UpdateBacklog(await reader.ReadOutboxBacklogAsync(stoppingToken));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {

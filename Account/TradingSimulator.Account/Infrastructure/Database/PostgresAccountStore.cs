@@ -1,4 +1,5 @@
 using TradingSimulator.Account.Infrastructure.Telemetry;
+using TradingSimulator.Commons.Telemetry;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -17,7 +18,7 @@ namespace TradingSimulator.Account.Infrastructure.Database;
 
 public sealed partial class PostgresAccountStore(
     string connectionString,
-    ILogger<PostgresAccountStore> logger) : IAccountStore, IOutbox, IOrderFundsStore, IResponseOutbox
+    ILogger<PostgresAccountStore> logger) : IAccountStore, IOutbox, IOrderFundsStore, IResponseOutbox, IOutboxBacklogReader
 {
     private const int SnapshotInterval = 1_000;
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
@@ -298,7 +299,7 @@ public sealed partial class PostgresAccountStore(
             insertOutbox.Parameters.AddWithValue("position", lastPosition);
             insertOutbox.Parameters.AddWithValue("eventType", eventType);
             insertOutbox.Parameters.AddWithValue("payload", payload);
-            insertOutbox.Parameters.AddWithValue("traceParent", (object?)AccountTelemetry.CurrentTraceParent() ?? DBNull.Value);
+            insertOutbox.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
             await insertOutbox.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -367,7 +368,7 @@ public sealed partial class PostgresAccountStore(
         command.Parameters.AddWithValue("accountId", account.Id.Guid);
         command.Parameters.AddWithValue("eventType", eventType);
         command.Parameters.AddWithValue("payload", payload);
-        command.Parameters.AddWithValue("traceParent", (object?)AccountTelemetry.CurrentTraceParent() ?? DBNull.Value);
+        command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
         var position = await command.ExecuteScalarAsync(cancellationToken);
         return position is long
             ? true

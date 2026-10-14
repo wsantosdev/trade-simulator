@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Moonad;
 using Npgsql;
 using NpgsqlTypes;
+using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Orders.Infrastructure.Messaging;
 using TradingSimulator.Orders.Common;
 using TradingSimulator.Orders.Domain;
@@ -14,7 +15,7 @@ using TradingSimulator.Orders.Domain.ValueObjects;
 namespace TradingSimulator.Orders.Infrastructure.Database;
 
 public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<PostgresOrderStore> logger)
-    : IOrderStore, IOutbox
+    : IOrderStore, IOutbox, IOutboxBacklogReader
 {
     public async Task<Result<bool, IOrderError>> InitializeAsync(CancellationToken cancellationToken)
     {
@@ -83,8 +84,8 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
                 VALUES (@orderId, @sequence, @eventType, @payload, @requestHash, @occurredAt)
                 RETURNING position
             )
-            INSERT INTO order_outbox (position, event_type, payload)
-            SELECT position, @eventType, @envelope FROM inserted WHERE @published;
+            INSERT INTO order_outbox (position, event_type, payload, traceparent)
+            SELECT position, @eventType, @envelope, @traceParent FROM inserted WHERE @published;
             """;
 
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -110,6 +111,7 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
                 Value = published ? OrderEventSerializer.SerializeEnvelope(@event) : "null"
             });
             command.Parameters.AddWithValue("published", published);
+            command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -177,7 +179,7 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
     public async Task<IReadOnlyList<PendingEvent>> ReadPendingAsync(int limit, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT position, event_type, payload::text
+            SELECT position, event_type, payload::text, traceparent
             FROM order_outbox
             WHERE published_at IS NULL
             ORDER BY position
@@ -188,8 +190,22 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var pending = new List<PendingEvent>();
         while (await reader.ReadAsync(cancellationToken))
-            pending.Add(new PendingEvent(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
+            pending.Add(new PendingEvent(
+                reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3)));
         return pending;
+    }
+
+    public async Task<IReadOnlyList<OutboxBacklog>> ReadOutboxBacklogAsync(CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT COUNT(*), COALESCE(EXTRACT(EPOCH FROM now() - MIN(e.occurred_at)), 0)
+            FROM order_outbox o JOIN order_events e ON e.position = o.position
+            WHERE o.published_at IS NULL;
+            """;
+        await using var command = dataSource.CreateCommand(sql);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        return [new OutboxBacklog("commands", reader.GetInt64(0), Convert.ToDouble(reader.GetValue(1)))];
     }
 
     public async Task MarkPublishedAsync(long position, CancellationToken cancellationToken)

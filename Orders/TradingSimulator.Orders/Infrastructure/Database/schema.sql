@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS order_outbox (
     published_at TIMESTAMPTZ NULL
 );
 
+ALTER TABLE order_outbox ADD COLUMN IF NOT EXISTS traceparent TEXT NULL;
+
 CREATE INDEX IF NOT EXISTS ix_order_outbox_pending_position
     ON order_outbox(position)
     WHERE published_at IS NULL;

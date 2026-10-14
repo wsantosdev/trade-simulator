@@ -4,9 +4,15 @@ namespace TradingSimulator.Orders.Processors.OrderTransition;
 
 // Applies what the exchange reported to the order. Throws only on infrastructure failures
 // (the message must be redelivered); business rejections are handled by the transitions.
-public sealed class OrderTransitionProcessor(IOrderTransitions transitions)
+public sealed class OrderTransitionProcessor(IOrderTransitions transitions, IOrdersMetrics metrics)
 {
-    public Task ProcessAsync(ExchangeEvent exchangeEvent, CancellationToken cancellationToken) => exchangeEvent switch
+    public async Task ProcessAsync(ExchangeEvent exchangeEvent, CancellationToken cancellationToken)
+    {
+        await ApplyAsync(exchangeEvent, cancellationToken);
+        metrics.ExchangeEventProcessed(exchangeEvent.GetType().Name.Replace("Exchange", string.Empty));
+    }
+
+    private Task ApplyAsync(ExchangeEvent exchangeEvent, CancellationToken cancellationToken) => exchangeEvent switch
     {
         ExchangeAcked e => transitions.AckAsync(e.OrderId, cancellationToken),
         ExchangeRejected e => transitions.RejectAsync(e.OrderId, cancellationToken),

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
+using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Orders.Common;
 using TradingSimulator.Orders.Domain.Entities;
 using TradingSimulator.Orders.Features.CancelOrder;
@@ -12,6 +13,7 @@ using TradingSimulator.Orders.Infrastructure.Database;
 using TradingSimulator.Orders.Infrastructure.Messaging;
 using TradingSimulator.Orders.Infrastructure.Realtime;
 using TradingSimulator.Orders.Infrastructure.Serialization;
+using TradingSimulator.Orders.Infrastructure.Telemetry;
 using TradingSimulator.Orders.Processors.AssetReservation;
 using TradingSimulator.Orders.Processors.OrderTransition;
 using TradingSimulator.Orders.Processors.FundsReservation;
@@ -19,6 +21,14 @@ using TradingSimulator.Orders.Processors.FundsReservation;
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Orders");
 builder.Services.AddOpenApi();
+builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, OrdersTelemetry.Service);
+builder.Services.AddHealthChecks()
+    .AddProbe("postgres", async (sp, ct) =>
+    {
+        await using var connection = await sp.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync(ct);
+    })
+    .AddRabbitMqProbe();
+builder.Services.AddSingleton<IOrdersMetrics, OrdersMetrics>();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     foreach (var converter in OrderJson.Options.Converters)
@@ -36,6 +46,7 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString ?? s
 builder.Services.AddSingleton<PostgresOrderStore>();
 builder.Services.AddSingleton<IOrderStore>(sp => sp.GetRequiredService<PostgresOrderStore>());
 builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresOrderStore>());
+builder.Services.AddOutboxBacklogMonitor<PostgresOrderStore>();
 builder.Services.AddSingleton<IOrderSearch, PostgresOrderSearch>();
 builder.Services.AddSingleton<IOrderHistory, PostgresOrderHistory>();
 builder.Services.AddSingleton<IOrderNotifier, SignalROrderNotifier>();
@@ -101,6 +112,7 @@ app.Use(async (context, next) =>
     if (string.IsNullOrWhiteSpace(correlationId))
         correlationId = Guid.CreateVersion7().ToString("D");
     context.Response.Headers["X-Correlation-Id"] = correlationId;
+    System.Diagnostics.Activity.Current?.SetTag("correlation.id", correlationId);
     await next();
 });
 app.UseCors();
@@ -108,6 +120,7 @@ app.UseCors();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
+app.MapTradingSimulatorHealth();
 app.MapSendOrderEndpoint();
 app.MapCancelOrderEndpoint();
 app.MapReplaceOrderEndpoint();

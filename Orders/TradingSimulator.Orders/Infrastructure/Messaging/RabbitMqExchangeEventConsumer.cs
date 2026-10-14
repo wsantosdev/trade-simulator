@@ -1,6 +1,8 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.Orders.Infrastructure.Telemetry;
 
 namespace TradingSimulator.Orders.Infrastructure.Messaging;
 
@@ -55,17 +57,21 @@ public sealed class RabbitMqExchangeEventConsumer(
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
+            using var activity = OrdersTelemetry.Service.StartConsumer(QueueName, ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers));
             try
             {
                 var body = Encoding.UTF8.GetString(delivery.Body.Span);
                 await handler.HandleAsync(body, stoppingToken);
                 await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
+                OrdersTelemetry.Service.MessageConsumed(QueueName, "acked");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
             }
             catch (Exception exception)
             {
+                activity.Fail(exception);
+                OrdersTelemetry.Service.MessageConsumed(QueueName, "requeued");
                 logger.LogError(exception, "Failed to process an exchange event; it will be redelivered.");
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 await channel.BasicNackAsync(delivery.DeliveryTag, false, true, stoppingToken);

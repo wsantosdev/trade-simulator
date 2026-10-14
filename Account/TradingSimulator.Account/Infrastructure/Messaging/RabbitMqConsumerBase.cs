@@ -2,6 +2,7 @@ using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using TradingSimulator.Account.Infrastructure.Telemetry;
+using TradingSimulator.Commons.Telemetry;
 
 namespace TradingSimulator.Account.Infrastructure.Messaging;
 
@@ -57,12 +58,12 @@ public abstract class RabbitMqConsumerBase(IConfiguration configuration, ILogger
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
-            using var activity = AccountTelemetry.StartConsumer(QueueName, TraceParentOf(delivery));
+            using var activity = AccountTelemetry.Service.StartConsumer(QueueName, TraceParentOf(delivery));
             try
             {
                 await HandleAsync(Encoding.UTF8.GetString(delivery.Body.Span), stoppingToken);
                 await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
-                AccountTelemetry.MessageConsumed(QueueName, "acked");
+                AccountTelemetry.Service.MessageConsumed(QueueName, "acked");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -70,7 +71,7 @@ public abstract class RabbitMqConsumerBase(IConfiguration configuration, ILogger
             catch (Exception exception)
             {
                 activity.Fail(exception);
-                AccountTelemetry.MessageConsumed(QueueName, "requeued");
+                AccountTelemetry.Service.MessageConsumed(QueueName, "requeued");
                 logger.LogError(exception, "Failed to process a message from {Queue}; it will be redelivered.", QueueName);
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 await channel.BasicNackAsync(delivery.DeliveryTag, false, true, stoppingToken);
@@ -83,7 +84,5 @@ public abstract class RabbitMqConsumerBase(IConfiguration configuration, ILogger
     }
 
     private static string? TraceParentOf(BasicDeliverEventArgs delivery) =>
-        delivery.BasicProperties.Headers?.TryGetValue(AccountTelemetry.TraceParentHeader, out var value) == true && value is byte[] bytes
-            ? Encoding.UTF8.GetString(bytes)
-            : null;
+        ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers);
 }

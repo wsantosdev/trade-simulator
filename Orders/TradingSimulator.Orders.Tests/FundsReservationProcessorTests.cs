@@ -81,7 +81,7 @@ public sealed class FundsReservationProcessorTests
         var (outcomes, s, n) = Create(order);
         store = s;
         notifier = n;
-        var processor = new FundsReservationProcessor(outcomes, NullLogger<FundsReservationProcessor>.Instance);
+        var processor = new FundsReservationProcessor(outcomes, new FakeMetrics(), NullLogger<FundsReservationProcessor>.Instance);
         return new FundsReservationMessageHandler(processor, NullLogger<FundsReservationMessageHandler>.Instance).HandleAsync(body, default);
     }
 
@@ -90,7 +90,7 @@ public sealed class FundsReservationProcessorTests
         var (outcomes, s, n) = Create(order);
         store = s;
         notifier = n;
-        var processor = new AssetReservationProcessor(outcomes, NullLogger<AssetReservationProcessor>.Instance);
+        var processor = new AssetReservationProcessor(outcomes, new FakeMetrics(), NullLogger<AssetReservationProcessor>.Instance);
         return new AssetReservationMessageHandler(processor, NullLogger<AssetReservationMessageHandler>.Instance).HandleAsync(body, default);
     }
 

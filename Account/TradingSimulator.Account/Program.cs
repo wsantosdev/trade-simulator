@@ -1,9 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
-using OpenTelemetry;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using TradingSimulator.Account.Common;
 using TradingSimulator.Account.Features.Shared;
 using TradingSimulator.Account.Processors.OrderFunds;
@@ -17,28 +13,16 @@ using TradingSimulator.Account.Infrastructure.Database;
 using TradingSimulator.Account.Infrastructure.Http;
 using TradingSimulator.Account.Infrastructure.Messaging;
 using TradingSimulator.Account.Infrastructure.Telemetry;
+using TradingSimulator.Commons.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Accounts");
 builder.Services.AddOpenApi();
-var telemetry = builder.Services.AddOpenTelemetry()
-    .ConfigureResource(resource => resource.AddService(AccountTelemetry.Name))
-    .WithTracing(tracing => tracing
-        .AddSource(AccountTelemetry.Name)
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddNpgsql())
-    .WithMetrics(metrics => metrics
-        .AddMeter(AccountTelemetry.Name)
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation())
-    .WithLogging();
-if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
-    telemetry.UseOtlpExporter();
+builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, AccountTelemetry.Service);
 builder.Services.AddHealthChecks()
-    .AddCheck<PostgresHealthCheck>("postgres", tags: ["ready"])
-    .AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: ["ready"]);
-builder.Services.AddHostedService<OutboxBacklogMonitor>();
+    .AddProbe("postgres", (sp, ct) => sp.GetRequiredService<PostgresAccountStore>().PingAsync(ct))
+    .AddRabbitMqProbe();
+builder.Services.AddOutboxBacklogMonitor<PostgresAccountStore>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:4200").AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddSingleton(sp =>
@@ -110,8 +94,7 @@ app.UseCors();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
-app.MapHealthChecks("/health/live", new() { Predicate = _ => false });
-app.MapHealthChecks("/health/ready", new() { Predicate = check => check.Tags.Contains("ready") });
+app.MapTradingSimulatorHealth();
 app.MapOpenAccountEndpoint();
 app.MapGetAccountEndpoint();
 app.MapDepositEndpoint();

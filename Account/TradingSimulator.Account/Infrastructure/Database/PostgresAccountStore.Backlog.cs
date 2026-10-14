@@ -1,5 +1,5 @@
 using Npgsql;
-using TradingSimulator.Account.Infrastructure.Telemetry;
+using TradingSimulator.Commons.Telemetry;
 
 namespace TradingSimulator.Account.Infrastructure.Database;
 

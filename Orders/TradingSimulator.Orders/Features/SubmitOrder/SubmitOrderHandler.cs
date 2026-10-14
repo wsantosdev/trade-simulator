@@ -22,7 +22,7 @@ public interface ISubmitOrder
     Task<Result<Order, IOrderError>> ExecuteAsync(SubmitOrderCommand command, CancellationToken cancellationToken);
 }
 
-public sealed class SubmitOrderHandler(IOrderStore store, IOrderNotifier notifier, TimeProvider clock) : ISubmitOrder
+public sealed class SubmitOrderHandler(IOrderStore store, IOrderNotifier notifier, TimeProvider clock, IOrdersMetrics metrics) : ISubmitOrder
 {
     public async Task<Result<Order, IOrderError>> ExecuteAsync(SubmitOrderCommand command, CancellationToken cancellationToken)
     {
@@ -37,14 +37,21 @@ public sealed class SubmitOrderHandler(IOrderStore store, IOrderNotifier notifie
             command.RequestHash,
             clock.GetUtcNow());
         if (order.IsError)
+        {
+            metrics.OperationCompleted("submit", order.ErrorValue);
             return order;
+        }
 
         var stored = await store.SendAsync(order.ResultValue, cancellationToken);
+        metrics.OperationCompleted("submit", stored.IsError ? stored.ErrorValue : null);
         if (stored.IsError)
             return stored;
 
         if (stored.ResultValue.Id == order.ResultValue.Id)
+        {
+            metrics.OrderSubmitted(command.Side.ToString(), command.Type.ToString());
             await notifier.OrderCreatedAsync(OrderView.From(stored.ResultValue), cancellationToken);
+        }
         return stored;
     }
 }
