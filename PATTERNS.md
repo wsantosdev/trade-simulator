@@ -91,6 +91,16 @@ TradingSimulator.Orders/
 
 - Quantidades de ativos são sempre números inteiros e devem ser representadas pelo tipo `Quantity` (`readonly struct` com propriedade `long Value`), nunca por `long`/`int` soltos em domínio, comandos, eventos e contratos. A criação ocorre por factory `TryCreate` que retorna `Result<Quantity, I<Modulo>Error>` e rejeita valores menores ou iguais a zero; saldos usam `Quantity.Zero` (o `default`), e as operações do domínio rejeitam `default` como quantidade informada; limites de negócio adicionais (por exemplo, teto por operação) são validados pela regra do caso de uso, com erro tipado próprio.
 
+## Observabilidade
+
+- Use **OpenTelemetry** (traces e métricas). A infraestrutura compartilhada fica em `Shared/TradingSimulator.Commons/Telemetry`; cada módulo declara apenas `Infrastructure/Telemetry/<Modulo>Telemetry.cs` (`ServiceTelemetry`, `ActivitySource` e `Meter` próprios) e `<Modulo>Metrics.cs`.
+- `Domain`, `Features`, `Processors` e `Common` não importam `Infrastructure` nem OpenTelemetry. Métricas de negócio são emitidas por uma porta de saída `I<Modulo>Metrics` implementada em `Infrastructure/Telemetry`; `ActivitySource` e `Meter` (BCL) são usados apenas na infraestrutura.
+- Propague o `traceparent` nas mensagens: o publisher cria um span `Producer` e grava o header; o consumer cria um span `Consumer` a partir dele. Em módulos com outbox, a coluna `traceparent` guarda o contexto até a publicação. O `correlation.id` vira tag do span da requisição.
+- Rótulos de métricas são **conjuntos fechados** (resultado, tipo, fila). Nunca use ids, tickers, preços, quantidades, saldos ou dados pessoais como rótulo ou tag; textos vindos de outro serviço só viram rótulo após whitelist.
+- Meça backlog do outbox (`IOutboxBacklogReader` + `OutboxBacklogMonitor`), mensagens consumidas por resultado (`acked`, `requeued`, `dropped`, `failed`) e falhas de publicação.
+- Cada serviço expõe `/health/live` (processo no ar) e `/health/ready` (dependências: banco, Redis, RabbitMQ, via `AddProbe`/`AddRabbitMqProbe`). O `/health` simples é mantido por compatibilidade.
+- O exportador OTLP só é ativado quando `OTEL_EXPORTER_OTLP_ENDPOINT` está configurado.
+
 ## Comunicação e interface
 
 - Desenvolva as interfaces com o usuário usando **Angular**, sempre na versão mais recente disponível.

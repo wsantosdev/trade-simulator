@@ -45,6 +45,7 @@ As regras completas estão em [`PATTERNS.md`](PATTERNS.md) (e as de interface em
 - **Railway-oriented programming**: erros esperados são valores (`Result<T, TError>`, biblioteca Moonad), não exceções; cada módulo tem seu catálogo de erros e o mapeamento para HTTP fica na infraestrutura.
 - **Mensageria** com envelope padrão (`EventEnvelope<T>`) e correlation id propagado do HTTP até os eventos.
 - **Tempo real** com SignalR e registro de interesse sob demanda, para a bolsa publicar apenas o que alguém está acompanhando.
+- **Observabilidade** com OpenTelemetry: traces propagados pelas mensagens (`traceparent`), métricas de negócio e de mensageria sem dados sensíveis, backlog do outbox e health checks de liveness/readiness. Exportação via OTLP quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido.
 - Enums sempre `: byte`; namespaces seguem as pastas.
 
 ## Estrutura de um módulo
@@ -56,7 +57,7 @@ TradingSimulator.<Modulo>/
 ├── Domain/               Entities, ValueObjects, Enums, Events, erros
 ├── Features/<CasoDeUso>/ endpoint, handler, portas e tipos da feature (API)
 ├── Processors/<CasoDeUso>/ processor e tipos neutros de uma reação a mensagens (worker)
-└── Infrastructure/       Database, Messaging, Realtime, Http, Serialization...
+└── Infrastructure/       Database, Messaging, Realtime, Http, Serialization, Telemetry...
 ```
 
 ## Executar localmente
@@ -85,7 +86,7 @@ Isso inicia PostgreSQL, Redis, RabbitMQ, os seis serviços e a UI. Os schemas e 
 | Exchange / Quotes / OfferBook | http://localhost:8083 / 8084 / 8085 |
 | RabbitMQ (gestão) | http://localhost:15672 (`account` / `account-local`) |
 
-As credenciais acima são **somente para desenvolvimento local**. Cada serviço expõe `GET /health`.
+As credenciais acima são **somente para desenvolvimento local**. Cada serviço expõe `GET /health`, `GET /health/live` e `GET /health/ready`.
 
 ### Carregar os dados da bolsa
 
