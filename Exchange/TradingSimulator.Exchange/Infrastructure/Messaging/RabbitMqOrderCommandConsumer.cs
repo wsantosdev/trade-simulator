@@ -1,6 +1,7 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using TradingSimulator.Commons.Messaging;
 using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Exchange.Infrastructure.Telemetry;
 using TradingSimulator.Exchange.Infrastructure.Serialization;
@@ -55,9 +56,12 @@ public sealed class RabbitMqOrderCommandConsumer(
             return Task.CompletedTask;
         };
 
+        using var drain = new ConsumerDrain();
+
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
+            using var inFlight = drain.Begin();
             using var activity = ExchangeTelemetry.Service.StartConsumer(
                 OrderTopology.CommandsQueue, ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers));
             try
@@ -66,11 +70,11 @@ public sealed class RabbitMqOrderCommandConsumer(
                 if (command.IsError)
                     logger.LogWarning("Dropped a malformed order command ({RoutingKey}).", delivery.RoutingKey);
                 else
-                    await engine.HandleAsync(command.ResultValue, stoppingToken);
-                await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, stoppingToken);
+                    await engine.HandleAsync(command.ResultValue, drain.Token);
+                await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, drain.Token);
                 ExchangeTelemetry.Service.MessageConsumed(OrderTopology.CommandsQueue, "acked");
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (drain.TimedOut)
             {
             }
             catch (Exception exception)
@@ -78,12 +82,15 @@ public sealed class RabbitMqOrderCommandConsumer(
                 activity.Fail(exception);
                 ExchangeTelemetry.Service.MessageConsumed(OrderTopology.CommandsQueue, "requeued");
                 logger.LogError(exception, "Could not process an order command; it will be redelivered.");
-                await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: true, stoppingToken);
+                await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: true, drain.Token);
             }
         };
-        await channel.BasicConsumeAsync(OrderTopology.CommandsQueue, autoAck: false, consumer, stoppingToken);
+        var consumerTag = await channel.BasicConsumeAsync(OrderTopology.CommandsQueue, autoAck: false, consumer, stoppingToken);
         logger.LogInformation("Consuming order commands from {Queue}.", OrderTopology.CommandsQueue);
 
         await Task.WhenAny(shutdown.Task, Task.Delay(Timeout.Infinite, stoppingToken));
+
+        if (stoppingToken.IsCancellationRequested && channel.IsOpen)
+            await drain.StopAsync(channel, consumerTag, OrderTopology.CommandsQueue, logger);
     }
 }

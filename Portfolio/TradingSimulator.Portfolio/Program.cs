@@ -1,3 +1,4 @@
+using TradingSimulator.Commons.Messaging;
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
 using StackExchange.Redis;
@@ -17,6 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Portfolio");
 var redisConnection = builder.Configuration.GetConnectionString("Redis");
 builder.Services.AddOpenApi();
+builder.Services.AddGracefulShutdown();
 builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, PortfolioTelemetry.Service);
 builder.Services.AddHealthChecks()
     .AddProbe("postgres", async (sp, ct) =>

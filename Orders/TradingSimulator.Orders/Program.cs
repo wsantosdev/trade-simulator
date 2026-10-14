@@ -1,3 +1,4 @@
+using TradingSimulator.Commons.Messaging;
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
 using TradingSimulator.Commons.Telemetry;
@@ -21,6 +22,7 @@ using TradingSimulator.Orders.Processors.FundsReservation;
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Orders");
 builder.Services.AddOpenApi();
+builder.Services.AddGracefulShutdown();
 builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, OrdersTelemetry.Service);
 builder.Services.AddHealthChecks()
     .AddProbe("postgres", async (sp, ct) =>

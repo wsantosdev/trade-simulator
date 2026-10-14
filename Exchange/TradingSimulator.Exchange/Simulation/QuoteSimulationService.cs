@@ -1,3 +1,4 @@
+using TradingSimulator.Commons.Messaging;
 using TradingSimulator.Exchange.Domain.ValueObjects;
 using TradingSimulator.Exchange.Processors.OrderCommands;
 
@@ -22,8 +23,10 @@ public sealed class QuoteSimulationService(
                 try
                 {
                     var now = timeProvider.GetUtcNow() + clockOffset;
-                    await simulator.RunCycleAsync(now, stoppingToken);
-                    await engine.RunCycleAsync(now, stoppingToken);
+                    // A cycle that started is finished even if a stop arrives meanwhile, so state and events stay consistent.
+                    using var grace = new CancellationTokenSource(OutboxPublishing.ItemTimeout);
+                    await simulator.RunCycleAsync(now, grace.Token);
+                    await engine.RunCycleAsync(now, grace.Token);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {

@@ -1,3 +1,4 @@
+using TradingSimulator.Commons.Messaging;
 using Npgsql;
 using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Exchange.Features.ImportInstruments;
@@ -17,6 +18,7 @@ using TradingSimulator.Exchange.Simulation;
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Exchange");
 builder.Services.AddOpenApi();
+builder.Services.AddGracefulShutdown();
 builder.Services.AddTradingSimulatorTelemetry(builder.Configuration, ExchangeTelemetry.Service);
 builder.Services.AddHealthChecks()
     .AddProbe("postgres", async (sp, ct) =>

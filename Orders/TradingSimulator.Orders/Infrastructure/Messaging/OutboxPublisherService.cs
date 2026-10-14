@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using TradingSimulator.Commons.Messaging;
 using Microsoft.Extensions.Logging;
 
 namespace TradingSimulator.Orders.Infrastructure.Messaging;
@@ -15,8 +16,12 @@ public sealed class OutboxPublisherService(IOutbox outbox, ICommandPublisher pub
                 var pending = await outbox.ReadPendingAsync(50, stoppingToken);
                 foreach (var item in pending)
                 {
-                    await publisher.PublishAsync(item, stoppingToken);
-                    await outbox.MarkPublishedAsync(item.Position, stoppingToken);
+                    if (stoppingToken.IsCancellationRequested)
+                        break;
+                    // The item in progress is finished (publish and mark) even if a stop arrives meanwhile.
+                    using var grace = new CancellationTokenSource(OutboxPublishing.ItemTimeout);
+                    await publisher.PublishAsync(item, grace.Token);
+                    await outbox.MarkPublishedAsync(item.Position, grace.Token);
                 }
 
                 if (pending.Count == 0)

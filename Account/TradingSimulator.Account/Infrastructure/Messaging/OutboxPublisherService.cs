@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using TradingSimulator.Commons.Messaging;
 using Microsoft.Extensions.Logging;
 
 namespace TradingSimulator.Account.Infrastructure.Messaging;

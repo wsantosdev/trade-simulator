@@ -1,6 +1,7 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using TradingSimulator.Commons.Messaging;
 using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Orders.Infrastructure.Telemetry;
 
@@ -54,18 +55,21 @@ public sealed class RabbitMqExchangeEventConsumer(
             return Task.CompletedTask;
         };
 
+        using var drain = new ConsumerDrain();
+
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
+            using var inFlight = drain.Begin();
             using var activity = OrdersTelemetry.Service.StartConsumer(QueueName, ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers));
             try
             {
                 var body = Encoding.UTF8.GetString(delivery.Body.Span);
-                await handler.HandleAsync(body, stoppingToken);
-                await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
+                await handler.HandleAsync(body, drain.Token);
+                await channel.BasicAckAsync(delivery.DeliveryTag, false, drain.Token);
                 OrdersTelemetry.Service.MessageConsumed(QueueName, "acked");
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (drain.TimedOut)
             {
             }
             catch (Exception exception)
@@ -73,13 +77,16 @@ public sealed class RabbitMqExchangeEventConsumer(
                 activity.Fail(exception);
                 OrdersTelemetry.Service.MessageConsumed(QueueName, "requeued");
                 logger.LogError(exception, "Failed to process an exchange event; it will be redelivered.");
-                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
-                await channel.BasicNackAsync(delivery.DeliveryTag, false, true, stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(2), drain.Token);
+                await channel.BasicNackAsync(delivery.DeliveryTag, false, true, drain.Token);
             }
         };
-        await channel.BasicConsumeAsync(QueueName, autoAck: false, consumer, stoppingToken);
+        var consumerTag = await channel.BasicConsumeAsync(QueueName, autoAck: false, consumer, stoppingToken);
         logger.LogInformation("Consuming exchange events from {Queue}.", QueueName);
 
         await Task.WhenAny(shutdown.Task, Task.Delay(Timeout.Infinite, stoppingToken));
+
+        if (stoppingToken.IsCancellationRequested && channel.IsOpen)
+            await drain.StopAsync(channel, consumerTag, QueueName, logger);
     }
 }

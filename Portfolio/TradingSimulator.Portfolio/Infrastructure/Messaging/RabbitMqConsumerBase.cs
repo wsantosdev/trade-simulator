@@ -1,6 +1,7 @@
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using TradingSimulator.Commons.Messaging;
 using TradingSimulator.Commons.Telemetry;
 using TradingSimulator.Portfolio.Infrastructure.Telemetry;
 
@@ -55,17 +56,20 @@ public abstract class RabbitMqConsumerBase(IConfiguration configuration, ILogger
             return Task.CompletedTask;
         };
 
+        using var drain = new ConsumerDrain();
+
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
+            using var inFlight = drain.Begin();
             using var activity = PortfolioTelemetry.Service.StartConsumer(QueueName, ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers));
             try
             {
-                await HandleAsync(Encoding.UTF8.GetString(delivery.Body.Span), stoppingToken);
-                await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
+                await HandleAsync(Encoding.UTF8.GetString(delivery.Body.Span), drain.Token);
+                await channel.BasicAckAsync(delivery.DeliveryTag, false, drain.Token);
                 PortfolioTelemetry.Service.MessageConsumed(QueueName, "acked");
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (drain.TimedOut)
             {
             }
             catch (Exception exception)
@@ -73,13 +77,16 @@ public abstract class RabbitMqConsumerBase(IConfiguration configuration, ILogger
                 activity.Fail(exception);
                 PortfolioTelemetry.Service.MessageConsumed(QueueName, "requeued");
                 logger.LogError(exception, "Failed to process a message from {Queue}; it will be redelivered.", QueueName);
-                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
-                await channel.BasicNackAsync(delivery.DeliveryTag, false, true, stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(2), drain.Token);
+                await channel.BasicNackAsync(delivery.DeliveryTag, false, true, drain.Token);
             }
         };
-        await channel.BasicConsumeAsync(QueueName, autoAck: false, consumer, stoppingToken);
+        var consumerTag = await channel.BasicConsumeAsync(QueueName, autoAck: false, consumer, stoppingToken);
         logger.LogInformation("Consuming messages from {Queue}.", QueueName);
 
         await Task.WhenAny(shutdown.Task, Task.Delay(Timeout.Infinite, stoppingToken));
+
+        if (stoppingToken.IsCancellationRequested && channel.IsOpen)
+            await drain.StopAsync(channel, consumerTag, QueueName, logger);
     }
 }
