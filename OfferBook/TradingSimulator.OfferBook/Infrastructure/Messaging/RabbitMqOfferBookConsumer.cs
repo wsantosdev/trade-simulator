@@ -2,6 +2,8 @@ using TradingSimulator.OfferBook.Processors.OfferBookUpdates;
 using System.Text;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.OfferBook.Infrastructure.Telemetry;
 using TradingSimulator.OfferBook.Common;
 using TradingSimulator.OfferBook.Infrastructure.Serialization;
 
@@ -62,15 +64,20 @@ public sealed class RabbitMqOfferBookConsumer(
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, delivery) =>
         {
+            using var activity = OfferBookTelemetry.Service.StartConsumer(
+                OfferBookTopology.BookQueue, ServiceTelemetry.TraceParentOf(delivery.BasicProperties.Headers));
             try
             {
                 var result = await processor.ProcessAsync(
                     Encoding.UTF8.GetString(delivery.Body.Span), OfferBookJson.Options, stoppingToken);
                 if (result.IsError)
                     logger.LogWarning("Dropped a malformed offer book message.");
+                OfferBookTelemetry.Service.MessageConsumed(OfferBookTopology.BookQueue, result.IsError ? "dropped" : "processed");
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                activity.Fail(exception);
+                OfferBookTelemetry.Service.MessageConsumed(OfferBookTopology.BookQueue, "failed");
                 logger.LogError(exception, "Offer book message could not be processed.");
             }
         };

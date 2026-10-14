@@ -2,6 +2,8 @@ using TradingSimulator.OfferBook.Processors.OfferBookInterest;
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
+using TradingSimulator.Commons.Telemetry;
+using TradingSimulator.OfferBook.Infrastructure.Telemetry;
 using TradingSimulator.OfferBook.Common;
 using TradingSimulator.OfferBook.Infrastructure.Serialization;
 
@@ -23,16 +25,22 @@ public sealed class RabbitMqOfferBookInterestPublisher(IConfiguration configurat
     private async Task SendAsync<T>(EventEnvelope<T> envelope, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
+        using var activity = OfferBookTelemetry.Service.StartPublisher(
+            OfferBookTopology.InterestExchange, OfferBookTopology.InterestRoutingKey, null);
         try
         {
             var channel = await EnsureChannelAsync(cancellationToken);
             var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, OfferBookJson.Options));
             var properties = new BasicProperties { ContentType = "application/json", DeliveryMode = DeliveryModes.Transient };
+            if (activity?.Id is { } traceParent)
+                properties.Headers = new Dictionary<string, object?> { [ServiceTelemetry.TraceParentHeader] = traceParent };
             await channel.BasicPublishAsync(
                 OfferBookTopology.InterestExchange, OfferBookTopology.InterestRoutingKey, mandatory: false, properties, body, cancellationToken);
+            OfferBookTelemetry.Service.OutboxPublished(OfferBookTopology.InterestExchange);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            activity.Fail(exception);
             await ResetAsync();
             throw;
         }

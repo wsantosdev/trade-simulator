@@ -10,10 +10,22 @@ namespace TradingSimulator.OfferBook.Processors.OfferBookUpdates;
 public sealed class OfferBookProcessor(
     LatestOfferBooks latest,
     IOfferBookNotifier notifier,
-    IOfferBookSnapshotRequestPublisher snapshotRequests)
+    IOfferBookSnapshotRequestPublisher snapshotRequests,
+    IOfferBookMetrics metrics)
 {
     // A malformed message is reported as an error and must be dropped, never retried.
     public async Task<Result<ProcessOutcome, IOfferBookError>> ProcessAsync(
+        string body, JsonSerializerOptions options, CancellationToken cancellationToken)
+    {
+        var result = await ParseAndApplyAsync(body, options, cancellationToken);
+        if (result.IsError)
+            metrics.UpdateMalformed();
+        else
+            metrics.UpdateProcessed(result.ResultValue);
+        return result;
+    }
+
+    private async Task<Result<ProcessOutcome, IOfferBookError>> ParseAndApplyAsync(
         string body, JsonSerializerOptions options, CancellationToken cancellationToken)
     {
         try

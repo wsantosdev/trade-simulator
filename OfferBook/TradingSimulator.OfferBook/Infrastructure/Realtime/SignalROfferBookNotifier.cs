@@ -2,6 +2,7 @@ using TradingSimulator.OfferBook.Processors.OfferBookUpdates;
 using Microsoft.AspNetCore.SignalR;
 using TradingSimulator.OfferBook.Common;
 using TradingSimulator.OfferBook.Domain.ValueObjects;
+using TradingSimulator.OfferBook.Infrastructure.Telemetry;
 
 namespace TradingSimulator.OfferBook.Infrastructure.Realtime;
 
@@ -24,6 +25,7 @@ public sealed class SignalROfferBookNotifier(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            OfferBookTelemetry.PushFailed(method);
             logger.LogWarning(exception, "Could not push {Method} of {Ticker}.", method, ticker);
         }
     }

@@ -122,7 +122,7 @@ public sealed class OfferBookTests
         var latest = new LatestOfferBooks();
         var notifier = new FakeNotifier();
         var requests = new FakeRequests();
-        var processor = new OfferBookProcessor(latest, notifier, requests);
+        var processor = new OfferBookProcessor(latest, notifier, requests, new FakeMetrics());
 
         var snapshot = await processor.ProcessAsync(Body(Snapshot()), OfferBookJson.Options, default);
         Assert.Equal(ProcessOutcome.SnapshotStored, snapshot.ResultValue);
@@ -143,7 +143,7 @@ public sealed class OfferBookTests
         var latest = new LatestOfferBooks();
         var notifier = new FakeNotifier();
         var requests = new FakeRequests();
-        var processor = new OfferBookProcessor(latest, notifier, requests);
+        var processor = new OfferBookProcessor(latest, notifier, requests, new FakeMetrics());
         latest.ApplySnapshot(Snapshot());
 
         var result = await processor.ProcessAsync(Body(Delta(15, 14)), OfferBookJson.Options, default);
@@ -157,7 +157,7 @@ public sealed class OfferBookTests
     public async Task Processor_rejects_malformed_messages()
     {
         var notifier = new FakeNotifier();
-        var processor = new OfferBookProcessor(new LatestOfferBooks(), notifier, new FakeRequests());
+        var processor = new OfferBookProcessor(new LatestOfferBooks(), notifier, new FakeRequests(), new FakeMetrics());
 
         Assert.True((await processor.ProcessAsync("{bad", OfferBookJson.Options, default)).IsError);
         Assert.True((await processor.ProcessAsync("{}", OfferBookJson.Options, default)).IsError);
