@@ -48,7 +48,7 @@ public sealed class RabbitMqOrderEventPublisher(IConfiguration configuration) : 
     private static object ToMessage(OrderEvent orderEvent) => orderEvent switch
     {
         OrderAcked e => new OrderAckedMessage(e.OrderId),
-        OrderRejected e => new OrderRejectedMessage(e.OrderId),
+        OrderRejected e => new OrderRejectedMessage(e.OrderId, e.Reason),
         OrderPartiallyFilled e => new OrderPartiallyFilledMessage(e.OrderId, e.Executed.Value, e.Remaining.Value, e.ExecutionPrice.Value),
         OrderFilled e => new OrderFilledMessage(e.OrderId, e.Executed.Value, e.ExecutionPrice.Value),
         OrderCancelled e => new OrderCancelledMessage(e.OrderId, e.Executed.Value, e.Remaining.Value),

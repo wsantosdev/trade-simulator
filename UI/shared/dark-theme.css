@@ -1,0 +1,96 @@
+/* Tema escuro: ativo com a classe "dark" no <html>. Remapeia a paleta do Tailwind e os utilitários que não dependem dela. */
+:root {
+  --book-bid-bar: #d1fae5;
+  --book-ask-bar: #fee2e2;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --book-bid-bar: #0f3d2e;
+  --book-ask-bar: #451a1c;
+
+
+  /* slate invertida: 50 = superfície mais escura, 950 = texto mais claro */
+  --color-slate-50: #1a1a1a;
+  --color-slate-100: #222222;
+  --color-slate-200: #303030;
+  --color-slate-300: #424242;
+  --color-slate-400: #7a7a7a;
+  --color-slate-500: #999999;
+  --color-slate-600: #b3b3b3;
+  --color-slate-700: #cccccc;
+  --color-slate-800: #e2e2e2;
+  --color-slate-900: #f0f0f0;
+  --color-slate-950: #fafafa;
+
+  --color-emerald-50: #0d2a22;
+  --color-emerald-100: #12382d;
+  --color-emerald-200: #1d5a47;
+  --color-amber-50: #2e2410;
+  --color-amber-100: #3d2f12;
+  --color-amber-200: #5c4719;
+  --color-amber-300: #8a6a1f;
+  --color-red-50: #331819;
+  --color-red-200: #6b2a2c;
+  --color-rose-50: #331820;
+  --color-rose-100: #40202a;
+  --color-rose-200: #6b2a3c;
+  --color-sky-50: #10283a;
+  --color-sky-100: #153650;
+  --color-indigo-100: #1e2552;
+}
+
+html.dark,
+.dark .bg-\[\#f6f8f7\] {
+  background-color: #0f0f0f;
+}
+
+/* Textos coloridos que eram escuros sobre fundo claro */
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-emerald-900,
+.dark .hover\:text-emerald-800:hover { color: #6ee7b7; }
+.dark .text-red-600,
+.dark .text-red-700,
+.dark .text-red-800 { color: #fca5a5; }
+.dark .text-rose-800 { color: #fda4af; }
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-amber-800 { color: #fcd34d; }
+.dark .text-sky-700,
+.dark .text-sky-800 { color: #7dd3fc; }
+.dark .text-indigo-800 { color: #a5b4fc; }
+
+.dark .bg-white,
+.dark .focus\:bg-white:focus { background-color: #171717; }
+
+/* Botão primário neutro (fundo claro no escuro): texto escuro */
+.dark .bg-slate-900 { color: #0f0f0f; }
+.dark .bg-slate-900:disabled { background-color: #303030; color: #999999; opacity: 1; }
+
+/* Cartão de saldo continua escuro, com texto claro */
+.dark .bg-slate-950 { background-color: #0a0a0a; }
+.dark .bg-slate-800 { background-color: #303030; }
+.dark .hover\:bg-slate-900:hover { background-color: #424242; }
+.dark .bg-slate-900\/50 { background-color: rgb(0 0 0 / 0.65); }
+
+/* Animações de piscar com cores para fundo escuro */
+@keyframes dark-book-flash-up-a { from { background-color: #166534; } to { background-color: transparent; } }
+@keyframes dark-book-flash-up-b { from { background-color: #166534; } to { background-color: transparent; } }
+@keyframes dark-book-flash-down-a { from { background-color: #991b1b; } to { background-color: transparent; } }
+@keyframes dark-book-flash-down-b { from { background-color: #991b1b; } to { background-color: transparent; } }
+@keyframes dark-flash-up-a { from { color: #34d399; } to { color: #f0f0f0; } }
+@keyframes dark-flash-up-b { from { color: #34d399; } to { color: #f0f0f0; } }
+@keyframes dark-flash-down-a { from { color: #f87171; } to { color: #f0f0f0; } }
+@keyframes dark-flash-down-b { from { color: #f87171; } to { color: #f0f0f0; } }
+
+:root.dark {
+  --animate-flash-up-a: dark-flash-up-a 700ms ease-out;
+  --animate-flash-up-b: dark-flash-up-b 700ms ease-out;
+  --animate-flash-down-a: dark-flash-down-a 700ms ease-out;
+  --animate-flash-down-b: dark-flash-down-b 700ms ease-out;
+  --animate-book-flash-up-a: dark-book-flash-up-a 900ms ease-out;
+  --animate-book-flash-up-b: dark-book-flash-up-b 900ms ease-out;
+  --animate-book-flash-down-a: dark-book-flash-down-a 900ms ease-out;
+  --animate-book-flash-down-b: dark-book-flash-down-b 900ms ease-out;
+}

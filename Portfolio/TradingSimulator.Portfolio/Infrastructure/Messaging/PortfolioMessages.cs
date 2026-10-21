@@ -9,6 +9,7 @@ public static class PortfolioEventTypes
     public const string Block = "Block";
     public const string Unblock = "Unblock";
     public const string OrderSubmitted = "OrderSubmitted";
+    public const string OrderScheduleCancelled = "OrderScheduleCancelled";
     public const string OrderPartiallyFilled = "OrderPartiallyFilled";
     public const string OrderFilled = "OrderFilled";
     public const string OrderCancelled = "OrderCancelled";

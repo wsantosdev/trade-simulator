@@ -7,7 +7,7 @@ public abstract record ExchangeEvent(OrderId OrderId);
 
 public sealed record ExchangeAcked(OrderId OrderId) : ExchangeEvent(OrderId);
 
-public sealed record ExchangeRejected(OrderId OrderId) : ExchangeEvent(OrderId);
+public sealed record ExchangeRejected(OrderId OrderId, string? Reason = null) : ExchangeEvent(OrderId);
 
 public sealed record ExchangePartiallyFilled(OrderId OrderId, long ExecutedQuantity, long RemainingQuantity, decimal ExecutionPrice) : ExchangeEvent(OrderId);
 

@@ -15,7 +15,7 @@ public interface IOrderTransitions
     Task DispatchAsync(OrderId id, CancellationToken cancellationToken);
     Task RejectSubmissionAsync(OrderId id, string reason, CancellationToken cancellationToken);
     Task AckAsync(OrderId id, CancellationToken cancellationToken);
-    Task RejectAsync(OrderId id, CancellationToken cancellationToken);
+    Task RejectAsync(OrderId id, string? reason, CancellationToken cancellationToken);
     Task PartiallyFillAsync(OrderId id, long executedQuantity, long remainingQuantity, decimal executionPrice, CancellationToken cancellationToken);
     Task FillAsync(OrderId id, long executedQuantity, decimal executionPrice, CancellationToken cancellationToken);
     Task CancelAsync(OrderId id, long executedQuantity, long remainingQuantity, CancellationToken cancellationToken);
@@ -24,13 +24,17 @@ public interface IOrderTransitions
     Task RejectReplaceAsync(OrderId id, CancellationToken cancellationToken);
 }
 
-public sealed class OrderTransitions(IOrderStore store, IOrderNotifier notifier, TimeProvider clock, ILogger<OrderTransitions> logger)
+public sealed class OrderTransitions(
+    IOrderStore store, IOrderNotifier notifier, TimeProvider clock, IMarketHours marketHours, ILogger<OrderTransitions> logger)
     : IOrderTransitions
 {
     private const int MaxAttempts = 5;
 
+    // With the market closed the order is scheduled instead of sent; ScheduledOrderDispatcher dispatches it at the opening.
     public Task DispatchAsync(OrderId id, CancellationToken cancellationToken) =>
-        ApplyAsync(id, "dispatch", (o, now) => o.Dispatch(now), cancellationToken);
+        marketHours.IsOpen()
+            ? ApplyAsync(id, "dispatch", (o, now) => o.Dispatch(now), cancellationToken)
+            : ApplyAsync(id, "scheduling", (o, now) => o.Schedule(now), cancellationToken);
 
     public Task RejectSubmissionAsync(OrderId id, string reason, CancellationToken cancellationToken) =>
         ApplyAsync(id, $"rejection ({reason})", (o, now) => o.RejectSubmission(reason, now), cancellationToken);
@@ -38,8 +42,8 @@ public sealed class OrderTransitions(IOrderStore store, IOrderNotifier notifier,
     public Task AckAsync(OrderId id, CancellationToken cancellationToken) =>
         ApplyAsync(id, "OrderAcked", (o, now) => o.Ack(now), cancellationToken);
 
-    public Task RejectAsync(OrderId id, CancellationToken cancellationToken) =>
-        ApplyAsync(id, "OrderRejected", (o, now) => o.Reject(now), cancellationToken);
+    public Task RejectAsync(OrderId id, string? reason, CancellationToken cancellationToken) =>
+        ApplyAsync(id, "OrderRejected", (o, now) => o.Reject(now, reason), cancellationToken);
 
     public Task PartiallyFillAsync(OrderId id, long executedQuantity, long remainingQuantity, decimal executionPrice, CancellationToken cancellationToken) =>
         ApplyAsync(id, "OrderPartiallyFilled", (o, now) => o.PartiallyFill(executedQuantity, remainingQuantity, executionPrice, now), cancellationToken);

@@ -2,12 +2,26 @@ using Npgsql;
 using NpgsqlTypes;
 using TradingSimulator.Orders.Common;
 using TradingSimulator.Orders.Domain.Enums;
+using TradingSimulator.Orders.Domain.ValueObjects;
 using TradingSimulator.Orders.Features.QueryOrders;
 
 namespace TradingSimulator.Orders.Infrastructure.Database;
 
-public sealed class PostgresOrderSearch(NpgsqlDataSource dataSource) : IOrderSearch
+public sealed class PostgresOrderSearch(NpgsqlDataSource dataSource) : IOrderSearch, IScheduledOrders
 {
+    public async Task<IReadOnlyList<OrderId>> ListAsync(int limit, CancellationToken cancellationToken)
+    {
+        await using var command = dataSource.CreateCommand(
+            "SELECT order_id FROM order_read_model WHERE state = @state ORDER BY sent_at, order_id LIMIT @limit;");
+        command.Parameters.AddWithValue("state", nameof(OrderState.ScheduledDispatching));
+        command.Parameters.AddWithValue("limit", limit);
+        var ids = new List<OrderId>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            ids.Add(OrderId.TryCreate(reader.GetGuid(0)).ResultValue);
+        return ids;
+    }
+
     private const string Columns = """
         order_id, account_id, ticker, side, type, quantity, price, state, executed_quantity,
         remaining_quantity, average_price, last_price, last_trade_at, sent_at, last_action_at

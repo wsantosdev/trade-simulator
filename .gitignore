@@ -8,3 +8,6 @@ COTACOES_*.TXT
 
 # JetBrains IDEs
 .idea/
+
+# Arquivos da B3 para a carga inicial da Exchange
+/data/

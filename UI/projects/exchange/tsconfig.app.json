@@ -4,7 +4,8 @@
     "types": []
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "../../shared/**/*.ts"
   ],
   "exclude": [
     "src/**/*.spec.ts"

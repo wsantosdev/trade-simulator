@@ -1,0 +1,99 @@
+@import "tailwindcss" source(".");
+@source "../../main/src";
+@import "../../../shared/dark-theme.css";
+
+html {
+  min-width: 320px;
+  scrollbar-gutter: stable;
+  background: #f6f8f7;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+@theme {
+  --animate-flash-up-a: flash-up-a 700ms ease-out;
+  --animate-flash-up-b: flash-up-b 700ms ease-out;
+  --animate-flash-down-a: flash-down-a 700ms ease-out;
+  --animate-flash-down-b: flash-down-b 700ms ease-out;
+
+  @keyframes flash-up-a {
+    from { color: #059669; }
+    to { color: #0f172a; }
+  }
+  @keyframes flash-up-b {
+    from { color: #059669; }
+    to { color: #0f172a; }
+  }
+  @keyframes flash-down-a {
+    from { color: #dc2626; }
+    to { color: #0f172a; }
+  }
+  @keyframes flash-down-b {
+    from { color: #dc2626; }
+    to { color: #0f172a; }
+  }
+}
+
+/* Livro de ofertas: o nível pisca com fundo, diferente do piscar de texto de cotações/boleta. */
+@theme {
+  --animate-book-flash-up-a: book-flash-up-a 900ms ease-out;
+  --animate-book-flash-up-b: book-flash-up-b 900ms ease-out;
+  --animate-book-flash-down-a: book-flash-down-a 900ms ease-out;
+  --animate-book-flash-down-b: book-flash-down-b 900ms ease-out;
+
+  @keyframes book-flash-up-a {
+    from { background-color: #86efac; }
+    to { background-color: transparent; }
+  }
+  @keyframes book-flash-up-b {
+    from { background-color: #86efac; }
+    to { background-color: transparent; }
+  }
+  @keyframes book-flash-down-a {
+    from { background-color: #fca5a5; }
+    to { background-color: transparent; }
+  }
+  @keyframes book-flash-down-b {
+    from { background-color: #fca5a5; }
+    to { background-color: transparent; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-flash-"],
+  [class*="animate-book-flash-"] {
+    animation: none !important;
+  }
+}
+
+/* Tudo o que é clicável usa o cursor de link (UI.md). */
+a[href],
+button:not(:disabled),
+select:not(:disabled),
+summary,
+label[for],
+input:is([type="checkbox"], [type="radio"], [type="submit"], [type="button"], [type="range"]):not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[role="tab"],
+[role="menuitem"],
+[tabindex]:not([tabindex="-1"]):is([role="button"], [role="link"]) {
+  cursor: pointer;
+}
+
+html, body { height: 100%; overflow: hidden; }
+
+/* Diálogos dos componentes reaproveitados (position: fixed) devem ficar acima de todas as janelas. */
+app-window-frame:has(.fixed.inset-0) { z-index: 1000 !important; }
+
+/* Componentes reaproveitados: remove o cartão duplicado dentro da janela. */
+.win-body section.rounded-lg { border-width: 0; box-shadow: none; border-radius: 0; }

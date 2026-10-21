@@ -53,6 +53,7 @@
     <File Path="UI/hub.conf" />
     <File Path="UI/package.json" />
     <File Path="UI/proxy.main.conf.json" />
+    <File Path="UI/proxy.broker.conf.json" />
     <File Path="UI/proxy.exchange.conf.json" />
     <File Path="UI/tsconfig.json" />
   </Folder>

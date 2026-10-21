@@ -15,7 +15,7 @@ public sealed class OrderTransitionProcessor(IOrderTransitions transitions, IOrd
     private Task ApplyAsync(ExchangeEvent exchangeEvent, CancellationToken cancellationToken) => exchangeEvent switch
     {
         ExchangeAcked e => transitions.AckAsync(e.OrderId, cancellationToken),
-        ExchangeRejected e => transitions.RejectAsync(e.OrderId, cancellationToken),
+        ExchangeRejected e => transitions.RejectAsync(e.OrderId, e.Reason, cancellationToken),
         ExchangePartiallyFilled e => transitions.PartiallyFillAsync(e.OrderId, e.ExecutedQuantity, e.RemainingQuantity, e.ExecutionPrice, cancellationToken),
         ExchangeFilled e => transitions.FillAsync(e.OrderId, e.ExecutedQuantity, e.ExecutionPrice, cancellationToken),
         ExchangeCancelled e => transitions.CancelAsync(e.OrderId, e.ExecutedQuantity, e.RemainingQuantity, cancellationToken),

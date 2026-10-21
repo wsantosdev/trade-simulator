@@ -118,7 +118,7 @@
             >
               <line x1="0" x2="640" [attr.y1]="chart.highY" [attr.y2]="chart.highY" stroke="#059669" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />
               <line x1="0" x2="640" [attr.y1]="chart.lowY" [attr.y2]="chart.lowY" stroke="#dc2626" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />
-              <path [attr.d]="chart.path" fill="none" stroke="#0f172a" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+              <path [attr.d]="chart.path" fill="none" class="stroke-slate-900" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
             </svg>
             <p class="mt-2 text-xs text-slate-500">
               Linhas tracejadas: máxima {{ formatPrice(quote.high) }} (verde) e mínima {{ formatPrice(quote.low) }} (vermelha).

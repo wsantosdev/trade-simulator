@@ -49,7 +49,7 @@ public sealed class OrderBookEngine(
                     break;
                 case RejectOrder reject:
                     if (_userOrders.TryAdd(reject.OrderId, default))
-                        Enqueue(new OrderRejected(reject.OrderId));
+                        Enqueue(new OrderRejected(reject.OrderId, "InvalidOrder"));
                     break;
                 case CancelOrder cancel:
                     await CancelAsync(cancel, cancellationToken);
@@ -107,14 +107,14 @@ public sealed class OrderBookEngine(
         var position = TradingSession.At(now);
         if (position.Phase != SessionPhase.Open)
         {
-            Enqueue(new OrderRejected(command.OrderId));
+            Enqueue(new OrderRejected(command.OrderId, "MarketClosed"));
             return;
         }
 
         var quote = await quotes.NextQuoteAsync(command.Ticker, now, cancellationToken);
         if (quote is null)
         {
-            Enqueue(new OrderRejected(command.OrderId));
+            Enqueue(new OrderRejected(command.OrderId, "NoQuote"));
             return;
         }
 
@@ -126,14 +126,14 @@ public sealed class OrderBookEngine(
                 : null;
         if (order is null)
         {
-            Enqueue(new OrderRejected(command.OrderId));
+            Enqueue(new OrderRejected(command.OrderId, "InvalidOrder"));
             return;
         }
 
         var outcome = tickerBook.Book.Submit(order);
         if (outcome.IsError)
         {
-            Enqueue(new OrderRejected(command.OrderId));
+            Enqueue(new OrderRejected(command.OrderId, "OrderBookRejected"));
             return;
         }
 

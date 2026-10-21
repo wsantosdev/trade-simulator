@@ -49,7 +49,12 @@ builder.Services.AddSingleton<PostgresOrderStore>();
 builder.Services.AddSingleton<IOrderStore>(sp => sp.GetRequiredService<PostgresOrderStore>());
 builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresOrderStore>());
 builder.Services.AddOutboxBacklogMonitor<PostgresOrderStore>();
-builder.Services.AddSingleton<IOrderSearch, PostgresOrderSearch>();
+builder.Services.AddSingleton<PostgresOrderSearch>();
+builder.Services.AddSingleton<IOrderSearch>(sp => sp.GetRequiredService<PostgresOrderSearch>());
+builder.Services.AddSingleton<IScheduledOrders>(sp => sp.GetRequiredService<PostgresOrderSearch>());
+builder.Services.AddSingleton<IMarketHours>(sp => new MarketHours(
+    sp.GetRequiredService<TimeProvider>(), builder.Configuration.GetValue<TimeSpan>("Simulation:SessionClockOffset")));
+builder.Services.AddHostedService<ScheduledOrderDispatcher>();
 builder.Services.AddSingleton<IOrderHistory, PostgresOrderHistory>();
 builder.Services.AddSingleton<IOrderNotifier, SignalROrderNotifier>();
 builder.Services.AddSingleton<OrderTransitions>();

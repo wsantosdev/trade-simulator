@@ -147,6 +147,77 @@
           }
         }
       }
+    },
+    "broker": {
+      "projectType": "application",
+      "schematics": {},
+      "root": "projects/broker",
+      "sourceRoot": "projects/broker/src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "projects/broker/src/main.ts",
+            "tsConfig": "projects/broker/tsconfig.app.json",
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "projects/broker/public"
+              }
+            ],
+            "styles": [
+              "projects/broker/src/styles.css"
+            ]
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "4kB",
+                  "maximumError": "8kB"
+                }
+              ],
+              "outputHashing": "all"
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": {
+              "buildTarget": "broker:build:production"
+            },
+            "development": {
+              "buildTarget": "broker:build:development"
+            }
+          },
+          "options": {
+            "proxyConfig": "proxy.broker.conf.json",
+            "port": 4201
+          },
+          "defaultConfiguration": "development"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "projects/broker/tsconfig.spec.json",
+            "buildTarget": "broker:build:development"
+          }
+        }
+      }
     }
   }
 }

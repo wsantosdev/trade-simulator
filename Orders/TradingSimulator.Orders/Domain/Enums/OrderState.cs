@@ -10,5 +10,7 @@ public enum OrderState : byte
     Rejected = 6,
     PendingCancel = 7,
     PendingReplace = 8,
-    PendingDispatching = 9
+    PendingDispatching = 9,
+    // Funds/assets are reserved but the market is closed: the order stays in Orders until it opens, and is then dispatched.
+    ScheduledDispatching = 10
 }

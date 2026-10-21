@@ -4,9 +4,10 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve main",
+    "start:broker": "ng serve broker",
     "start:exchange": "ng serve exchange",
-    "build": "ng build main && ng build exchange",
-    "test": "ng test main --watch=false && ng test exchange --watch=false"
+    "build": "ng build main && ng build broker && ng build exchange",
+    "test": "ng test main --watch=false && ng test broker --watch=false && ng test exchange --watch=false"
   },
   "private": true,
   "packageManager": "npm@11.17.0",

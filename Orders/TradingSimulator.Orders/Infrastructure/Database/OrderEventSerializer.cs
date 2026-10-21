@@ -8,7 +8,7 @@ public static class OrderEventSerializer
 {
     private static readonly Dictionary<string, Type> Types = new[]
     {
-        typeof(OrderSubmitted), typeof(OrderDispatched), typeof(OrderAcked), typeof(OrderRejected), typeof(OrderPartiallyFilled),
+        typeof(OrderSubmitted), typeof(OrderDispatched), typeof(OrderScheduled), typeof(OrderScheduleCancelled), typeof(OrderAcked), typeof(OrderRejected), typeof(OrderPartiallyFilled),
         typeof(OrderFilled), typeof(OrderCancelRequested), typeof(OrderCancelled), typeof(OrderCancelRejected),
         typeof(OrderReplaceRequested), typeof(OrderReplaced), typeof(OrderReplaceRejected)
     }.ToDictionary(type => type.Name);
@@ -17,7 +17,7 @@ public static class OrderEventSerializer
 
     // Only these events are commands for the Exchange and go through the outbox.
     public static bool IsPublished(OrderEvent @event) =>
-        @event is OrderSubmitted or OrderDispatched or OrderCancelRequested or OrderReplaceRequested;
+        @event is OrderSubmitted or OrderDispatched or OrderCancelRequested or OrderReplaceRequested or OrderScheduleCancelled;
 
     public static string Serialize(OrderEvent @event) =>
         JsonSerializer.Serialize(@event, @event.GetType(), OrderJson.Options);

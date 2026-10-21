@@ -29,6 +29,7 @@
 - Registro: `InstrumentId` (UUID v7, gerado na primeira importação e estável nas seguintes), `Ticker` (ex.: `PETR4`) e nome (`Desc` com espaços normalizados, ex.: `PETROBRAS PN N2`). Tickers fora do padrão (sufixo `B` de balcão, iniciados por dígito) são ignorados.
 - Tabela `instruments` no schema `exchange` (`Infrastructure/Database/schema.sql`), com `ticker` único; reimportar é idempotente (*upsert* por ticker, atualizando só o nome).
 - Importação por linha de comando (não é endpoint HTTP): `dotnet run --project Exchange/TradingSimulator.Exchange -- --import-instruments <caminho do XML>`.
+- Carga automática: se `Seed:Directory` estiver configurado, a Exchange importa em segundo plano, ao iniciar, o `BVBG*.xml` mais recente quando `instruments` está vazia (idem `COTAHIST*.TXT`/`COTACOES_*.TXT` para `quotes`).
 - Consulta: `GET /api/instruments?search=&page=` e `GET /api/instruments/{ticker}`.
 
 ## Cotações históricas

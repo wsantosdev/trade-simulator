@@ -8,6 +8,7 @@ using TradingSimulator.Exchange.Features.SearchInstruments;
 using TradingSimulator.Exchange.Features.QueryQuotes;
 using TradingSimulator.Exchange.Infrastructure.Database;
 using TradingSimulator.Exchange.Infrastructure.Messaging;
+using TradingSimulator.Exchange.Infrastructure.Seeding;
 using TradingSimulator.Exchange.Infrastructure.Sources;
 using TradingSimulator.Exchange.Infrastructure.Telemetry;
 using TradingSimulator.Exchange.Processors.OfferBook;
@@ -66,6 +67,7 @@ builder.Services.AddHostedService<RabbitMqQuoteInterestConsumer>();
 builder.Services.AddHostedService<RabbitMqOrderCommandConsumer>();
 builder.Services.AddHostedService<RabbitMqOfferBookInterestConsumer>();
 builder.Services.AddHostedService<QuoteSimulationService>();
+builder.Services.AddHostedService<DataSeedService>();
 
 var app = builder.Build();
 if (string.IsNullOrWhiteSpace(connectionString))

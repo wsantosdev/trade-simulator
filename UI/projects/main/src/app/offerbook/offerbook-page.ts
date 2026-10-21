@@ -19,7 +19,7 @@ export class OfferBookPage implements OnInit, OnDestroy {
 
   protected barStyle(side: Side, level: BookLevel): string {
     const percent = this.store.barPercent(level);
-    const color = side === 'Bid' ? '#d1fae5' : '#fee2e2';
+    const color = side === 'Bid' ? 'var(--book-bid-bar)' : 'var(--book-ask-bar)';
     const direction = side === 'Bid' ? 'to left' : 'to right';
     return `linear-gradient(${direction}, ${color} ${percent}%, transparent ${percent}%)`;
   }

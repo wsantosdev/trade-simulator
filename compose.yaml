@@ -44,6 +44,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
+      Simulation__SessionClockOffset: ${EXCHANGE_SESSION_CLOCK_OFFSET:-00:00:00}
       ConnectionStrings__Orders: Host=postgres;Port=5432;Database=tradingsimulator;Username=orders;Password=orders-local;Search Path=orders
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
@@ -64,9 +65,12 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       Simulation__SessionClockOffset: ${EXCHANGE_SESSION_CLOCK_OFFSET:-00:00:00}
+      Seed__Directory: /seed
       ConnectionStrings__Exchange: Host=postgres;Port=5432;Database=tradingsimulator;Username=exchange;Password=exchange-local;Search Path=exchange
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
+    volumes:
+      - ${EXCHANGE_SEED_DIR:-./data/b3}:/seed:ro
     ports:
       - "8083:8080"
     depends_on:
@@ -157,6 +161,7 @@ services:
       context: UI
     ports:
       - "4200:4200"
+      - "4201:4201"
       - "4204:4204"
     depends_on:
       - tradingsimulator-account

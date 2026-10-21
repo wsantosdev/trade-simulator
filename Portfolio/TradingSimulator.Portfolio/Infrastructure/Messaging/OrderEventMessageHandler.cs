@@ -15,6 +15,12 @@ public sealed class OrderEventMessageHandler(
         if (envelope is null)
             return;
 
+        if (envelope.EventType == PortfolioEventTypes.OrderScheduleCancelled)
+        {
+            await ReleaseScheduledAsync(envelope, cancellationToken);
+            return;
+        }
+
         if (envelope.EventType != PortfolioEventTypes.OrderSubmitted)
         {
             logger.LogDebug("Discarded order event {EventType}.", envelope.EventType);
@@ -46,5 +52,34 @@ public sealed class OrderEventMessageHandler(
 
         await processor.ReserveAsync(
             envelope.Id, new SellOrder(submitted.OrderId, submitted.AccountId, submitted.Ticker, submitted.Quantity), cancellationToken);
+    }
+
+    // A scheduled order cancelled in Orders never reached the Exchange: release the whole reservation.
+    private async Task ReleaseScheduledAsync(EventEnvelope<JsonElement> envelope, CancellationToken cancellationToken)
+    {
+        if (!EnvelopeReader.HasValidId(envelope))
+        {
+            logger.LogWarning("Discarded {EventType} with an invalid envelope id.", envelope.EventType);
+            return;
+        }
+
+        Guid orderId;
+        try
+        {
+            orderId = envelope.Event.Deserialize<OrderClosureMessage>(Serialization.PortfolioJson.Options)?.OrderId ?? Guid.Empty;
+        }
+        catch (JsonException exception)
+        {
+            logger.LogWarning(exception, "{EventType} {EnvelopeId} has an invalid payload; discarded.", envelope.EventType, envelope.Id);
+            return;
+        }
+
+        if (orderId == Guid.Empty)
+        {
+            logger.LogWarning("{EventType} {EnvelopeId} has no order id; discarded.", envelope.EventType, envelope.Id);
+            return;
+        }
+
+        await processor.SettleOrderAsync(envelope.Id, orderId, 0, true, cancellationToken);
     }
 }

@@ -1,5 +1,6 @@
 using TradingSimulator.Orders.Domain;
 using TradingSimulator.Orders.Domain.Entities;
+using TradingSimulator.Orders.Domain.Events;
 using TradingSimulator.Orders.Domain.Enums;
 using TradingSimulator.Orders.Domain.ValueObjects;
 
@@ -14,6 +15,24 @@ public sealed class OrderTests
         string? ticker = "PETR4", OrderType type = OrderType.Limit, long quantity = 100,
         decimal? price = 10m, string? hash = null, OrderSide side = OrderSide.Buy) =>
         Order.Send(OrderId.New(), Guid.CreateVersion7(), ticker, side, type, quantity, price, hash ?? Hash, Now);
+
+    [Fact]
+    public void Scheduled_order_is_cancelled_locally_or_dispatched_at_open()
+    {
+        var order = Send().ResultValue;
+        Assert.False(order.Schedule(Now).IsError);
+        Assert.Equal(OrderState.ScheduledDispatching, order.State);
+        Assert.True(order.RequestReplace(10m, Now).IsError);
+
+        Assert.False(order.RequestCancel(Now).IsError);
+        Assert.Equal(OrderState.Cancelled, order.State);
+        Assert.IsType<OrderScheduleCancelled>(order.UncommittedEvents[^1]);
+
+        var other = Send().ResultValue;
+        other.Schedule(Now);
+        Assert.False(other.Dispatch(Now).IsError);
+        Assert.Equal(OrderState.PendingNew, other.State);
+    }
 
     [Fact]
     public void Limit_order_is_created_as_pending_new()

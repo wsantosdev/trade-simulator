@@ -111,9 +111,13 @@ public sealed class Order
     public void MarkCommitted() => _uncommitted.Clear();
 
     public Result<Order, IOrderError> RequestCancel(DateTimeOffset now) =>
-        State is OrderState.New or OrderState.PartiallyFilled
-            ? Raise(new OrderCancelRequested(Id, now))
-            : new InvalidStateTransition();
+        State switch
+        {
+            // Never reached the Exchange: cancelled locally, and the reservation is released by Account/Portfolio.
+            OrderState.ScheduledDispatching => Raise(new OrderScheduleCancelled(Id, now)),
+            OrderState.New or OrderState.PartiallyFilled => Raise(new OrderCancelRequested(Id, now)),
+            _ => new InvalidStateTransition()
+        };
 
     public Result<Order, IOrderError> RequestReplace(decimal newPrice, DateTimeOffset now)
     {
@@ -129,12 +133,16 @@ public sealed class Order
     public Result<Order, IOrderError> Ack(DateTimeOffset now) =>
         State == OrderState.PendingNew ? Raise(new OrderAcked(Id, now)) : new InvalidStateTransition();
 
-    public Result<Order, IOrderError> Reject(DateTimeOffset now) =>
-        State == OrderState.PendingNew ? Raise(new OrderRejected(Id, now)) : new InvalidStateTransition();
+    // The market is closed: the order waits in Orders (the Exchange never sees it) until Dispatch at the opening.
+    public Result<Order, IOrderError> Schedule(DateTimeOffset now) =>
+        State == OrderState.PendingDispatching ? Raise(new OrderScheduled(Id, now)) : new InvalidStateTransition();
+
+    public Result<Order, IOrderError> Reject(DateTimeOffset now, string? reason = null) =>
+        State == OrderState.PendingNew ? Raise(new OrderRejected(Id, now, reason)) : new InvalidStateTransition();
 
     // The internal validation (funds or assets) succeeded: only now the order is sent to the Exchange.
     public Result<Order, IOrderError> Dispatch(DateTimeOffset now) =>
-        State == OrderState.PendingDispatching
+        State is OrderState.PendingDispatching or OrderState.ScheduledDispatching
             ? Raise(new OrderDispatched(Id, AccountId, Ticker, Side, Type, Quantity, Price, RequestHash, now))
             : new InvalidStateTransition();
 
@@ -208,6 +216,12 @@ public sealed class Order
         {
             case OrderDispatched:
                 State = OrderState.PendingNew;
+                break;
+            case OrderScheduled:
+                State = OrderState.ScheduledDispatching;
+                break;
+            case OrderScheduleCancelled:
+                State = OrderState.Cancelled;
                 break;
             case OrderAcked:
                 State = OrderState.New;

@@ -9,6 +9,7 @@ public static class FundsEventTypes
     public const string OrderPartiallyFilled = "OrderPartiallyFilled";
     public const string OrderFilled = "OrderFilled";
     public const string OrderCancelled = "OrderCancelled";
+    public const string OrderScheduleCancelled = "OrderScheduleCancelled";
     public const string OrderRejected = "OrderRejected";
     public const string ReservationResult = "FundsReservationResult";
     public const string ReservedRoutingKey = "funds.reserved";

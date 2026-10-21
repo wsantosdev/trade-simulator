@@ -50,6 +50,7 @@
 ## Estados da ordem
 
 - Estados: **PendingDispatching** (Despacho pendente), **PendingNew** (Pendente), **New** (Nova), **Parcialmente executada**, **Executada**, **Cancelada** e **Rejeitada**.
+- Agendamento: com o mercado fechado (10:00–18:00 Brasília; deslocável por `Simulation:SessionClockOffset`, igual ao da Exchange) a ordem, após a reserva de fundos/ativos, vai de **PendingDispatching** para **ScheduledDispatching** (*Agendada*) via **OrderScheduled** (não publicado). A Exchange não conhece agendamento e nunca recebe a ordem nesse estado. Um serviço em segundo plano despacha as agendadas ao abrir o mercado (→ **PendingNew**, fluxo normal). Cancelar uma ordem agendada é local: **OrderScheduleCancelled** (publicado; Account e Portfolio o consomem para liberar os bloqueios) leva a **Cancelled**. Substituição não é permitida enquanto agendada.
 - Vocabulário: **Submitted = ação do cliente; Dispatched = ação do sistema.** Toda ordem nasce com o evento **OrderSubmitted** em **PendingDispatching** (Despacho pendente); só após a validação interna (Conta/Portfólio) o sistema grava **OrderDispatched** e ela passa a **PendingNew**; vira **New** somente ao receber o *ack* do Exchange.
 - Também existem os estados transitórios **PendingCancel** e **PendingReplace**.
 - Novos estados poderão ser adicionados no futuro.

@@ -9,7 +9,8 @@ export type OrderState =
   | 'Rejected'
   | 'PendingCancel'
   | 'PendingReplace'
-  | 'PendingDispatching';
+  | 'PendingDispatching'
+  | 'ScheduledDispatching';
 
 export const orderStates: { value: OrderState; label: string }[] = [
   { value: 'PendingNew', label: 'Pendente' },
@@ -21,11 +22,13 @@ export const orderStates: { value: OrderState; label: string }[] = [
   { value: 'PendingCancel', label: 'Cancelamento pendente' },
   { value: 'PendingReplace', label: 'Alteração pendente' },
   { value: 'PendingDispatching', label: 'Despacho pendente' },
+  { value: 'ScheduledDispatching', label: 'Agendada' },
 ];
 
 export const stateBadgeClasses: Record<OrderState, string> = {
   PendingDispatching: 'bg-slate-100 text-slate-700',
   PendingNew: 'bg-amber-100 text-amber-800',
+  ScheduledDispatching: 'bg-violet-800 text-violet-100',
   New: 'bg-sky-100 text-sky-800',
   PartiallyFilled: 'bg-indigo-100 text-indigo-800',
   Filled: 'bg-emerald-100 text-emerald-800',
@@ -119,8 +122,8 @@ export const isAccountNumber = (value: string): boolean => uuidV7.test(value.tri
 export const isTicker = (value: string): boolean => /^[A-Z]{4}[345]$/.test(value);
 
 export const canChange = (order: Order): boolean =>
-  order.state === 'New' || order.state === 'PartiallyFilled';
-export const canReplace = (order: Order): boolean => canChange(order) && order.type === 'Limit';
+  order.state === 'New' || order.state === 'PartiallyFilled' || order.state === 'ScheduledDispatching';
+export const canReplace = (order: Order): boolean => canChange(order) && order.state !== 'ScheduledDispatching' && order.type === 'Limit';
 
 export type QuoteVariation = 'Up' | 'Down' | 'Unchanged';
 

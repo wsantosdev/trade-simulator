@@ -61,11 +61,21 @@ public sealed class FundsReservationProcessorTests
         Wrap("{\"isError\":false,\"result\":{\"orderId\":\"" + order.Id.Guid + "\",\"accountId\":\"" + order.AccountId.Guid +
              "\",\"amount\":1000.00}}");
 
+    private sealed class ClosedMarket : TradingSimulator.Orders.Common.IMarketHours
+    {
+        public bool IsOpen() => false;
+    }
+
+    private sealed class AlwaysOpen : TradingSimulator.Orders.Common.IMarketHours
+    {
+        public bool IsOpen() => true;
+    }
+
     private static (IOrderTransitions Outcomes, FakeStore Store, FakeNotifier Notifier) Create(Order order)
     {
         var store = new FakeStore(order);
         var notifier = new FakeNotifier();
-        return (new OrderTransitions(store, notifier, TimeProvider.System, NullLogger<OrderTransitions>.Instance), store, notifier);
+        return (new OrderTransitions(store, notifier, TimeProvider.System, new AlwaysOpen(), NullLogger<OrderTransitions>.Instance), store, notifier);
     }
 
     private static string AssetErrorBody(Order order, string kind = "InsufficientQuantity") =>
@@ -105,6 +115,21 @@ public sealed class FundsReservationProcessorTests
         Assert.IsType<OrderDispatched>(store.Appended[^1]);
         Assert.Equal(1, store.Appends);
         Assert.Equal(1, notifier.Calls);
+    }
+
+    [Fact]
+    public async Task Dispatch_with_market_closed_schedules_instead_of_dispatching()
+    {
+        var order = NewOrder();
+        var store = new FakeStore(order);
+        var transitions = new OrderTransitions(
+            store, new FakeNotifier(), TimeProvider.System, new ClosedMarket(), NullLogger<OrderTransitions>.Instance);
+
+        await transitions.DispatchAsync(order.Id, CancellationToken.None);
+
+        Assert.Equal(OrderState.ScheduledDispatching, order.State);
+        Assert.IsType<OrderScheduled>(store.Appended[^1]);
+        Assert.DoesNotContain(store.Appended, e => e is OrderDispatched);
     }
 
     [Fact]

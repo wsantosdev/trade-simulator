@@ -16,7 +16,7 @@ Cada módulo é um microsserviço .NET 10 independente, com seu próprio projeto
 | **Exchange** | 8083 | A bolsa. Livro de ofertas com casamento de ordens, cadastro de instrumentos, histórico de cotações e simulação de pregão. Serviço externo: **não conhece nenhum outro módulo**. |
 | **Quotes** | 8084 | Cotações em tempo real, via SignalR. |
 | **OfferBook** | 8085 | Livro de ofertas em tempo real, via SignalR. |
-| **UI** | 4200 / 4204 | Angular. App principal em `4200` (conta, ordens, carteira, cotações, livro); UI da bolsa em `4204`. |
+| **UI** | 4200 / 4201 / 4204 | Angular. App principal em `4200` (conta, ordens, carteira, cotações, livro); home broker com janelas flutuantes em `4201`; UI da bolsa em `4204`. |
 
 `Shared/TradingSimulator.Commons` contém apenas o que é comum aos serviços na comunicação: `EventEnvelope<T>` e conversores JSON.
 
@@ -25,7 +25,8 @@ Cada módulo é um microsserviço .NET 10 independente, com seu próprio projeto
 1. O usuário abre uma conta e deposita fundos (**Account**).
 2. Ao enviar uma ordem, **Orders** a registra como pendente e publica um comando de reserva: de **fundos** em Account (compra) ou de **ativos** em Portfolio (venda).
 3. Account/Portfolio respondem com sucesso ou falha. Em caso de falha a ordem é rejeitada; em caso de sucesso, Orders a despacha para a **Exchange**.
-4. A **Exchange** casa as ordens no livro e publica eventos (aceita, parcialmente executada, executada, cancelada, substituída, rejeitada).
+4. A **Exchange** casa as ordens no livro e publica eventos (aceita, parcialmente executada, executada, cancelada, substituída, rejeitada). Rejeições trazem o motivo (`reason`, ex.: `NoQuote`, `InvalidOrder`), exibido no histórico da ordem.
+   - **Agendamento (módulo Orders):** com o mercado fechado (fora de 10:00–18:00, Brasília), após a reserva de fundos/ativos a ordem vai para **ScheduledDispatching** (*Agendada*) e **não é enviada à Exchange**, que desconhece o conceito. Os bloqueios permanecem; ao abrir a sessão o Orders a despacha (→ `PendingNew`, fluxo normal). Cancelar uma ordem agendada é local (`OrderScheduleCancelled`) e libera os bloqueios em Account/Portfolio. As ordens ficam persistidas no event store do Orders (sobrevivem a reinícios).
 5. **Orders** aplica os eventos ao estado da ordem; **Account** debita/libera saldo e **Portfolio** movimenta ativos a partir desses mesmos eventos.
 6. A Exchange publica cotações e livro de ofertas só para tickers com interesse registrado; **Quotes** e **OfferBook** renovam periodicamente esse interesse (heartbeat) enquanto houver clientes conectados e retransmitem as atualizações por SignalR para a UI.
 
@@ -81,6 +82,7 @@ Isso inicia PostgreSQL, Redis, RabbitMQ, os seis serviços e a UI. Os schemas e 
 | Serviço | URL |
 | --- | --- |
 | UI principal | http://localhost:4200 |
+| UI Home Broker | http://localhost:4201 |
 | UI da Exchange | http://localhost:4204 |
 | Account / Orders / Portfolio | http://localhost:8080 / 8081 / 8082 |
 | Exchange / Quotes / OfferBook | http://localhost:8083 / 8084 / 8085 |
@@ -95,6 +97,8 @@ A Exchange precisa de instrumentos e cotações históricas da B3. Os arquivos n
 - **Instrumentos** (arquivo `BVBG.028`, XML): `dotnet run --project Exchange/TradingSimulator.Exchange -- --import-instruments <caminho do XML>`
 - **Cotações históricas** (arquivo `COTAHIST`, TXT): `dotnet run --project Exchange/TradingSimulator.Exchange -- --import-quotes <caminho do TXT>`
 
+**Carga automática na inicialização:** coloque os arquivos (`BVBG*.xml` e `COTAHIST*.TXT`/`COTACOES_*.TXT`) em `data/b3/` (ou aponte outra pasta com `EXCHANGE_SEED_DIR`). Ao subir, a Exchange importa, em segundo plano, o arquivo mais recente de cada tipo, mas só para tabelas ainda vazias; portanto reiniciar não reimporta. A API fica disponível durante a carga. Fora do Docker, defina `Seed__Directory`.
+
 Para executar a importação contra o PostgreSQL do Docker, use a string de conexão do Exchange (`ConnectionStrings__Exchange`) apontando para `localhost:5432`.
 
 Para simular o pregão fora do horário de mercado, defina `EXCHANGE_SESSION_CLOCK_OFFSET` (ex.: `EXCHANGE_SESSION_CLOCK_OFFSET=-06:00:00 docker compose up`) para deslocar o relógio da sessão.
@@ -107,6 +111,7 @@ Com os serviços de pé no Docker:
 cd UI
 npm install
 npm start                  # app principal em http://localhost:4200
+npm run start:broker       # Home broker em http://localhost:4201
 npm run start:exchange     # UI da Exchange em http://localhost:4204
 ```
 

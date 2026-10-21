@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, HostListener, inject, input, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
+import { ThemeToggle } from '../../../../../../shared/theme-toggle';
 import { CurrentAccount } from '../current-account';
 
 interface MenuItem {
@@ -9,7 +10,7 @@ interface MenuItem {
 
 @Component({
   selector: 'app-main-menu',
-  imports: [RouterLink, RouterLinkActive],
+  imports: [RouterLink, RouterLinkActive, ThemeToggle],
   templateUrl: './main-menu.html',
   host: { class: 'relative block' },
   changeDetection: ChangeDetectionStrategy.OnPush,

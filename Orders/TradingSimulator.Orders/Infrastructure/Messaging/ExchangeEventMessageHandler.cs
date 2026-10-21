@@ -56,7 +56,10 @@ public sealed class ExchangeEventMessageHandler(OrderTransitionProcessor process
             case "OrderAcked":
                 return new ExchangeAcked(Read<OrderAckedMessage>().OrderId);
             case "OrderRejected":
-                return new ExchangeRejected(Read<OrderRejectedMessage>().OrderId);
+            {
+                var rejected = Read<OrderRejectedMessage>();
+                return new ExchangeRejected(rejected.OrderId, rejected.Reason);
+            }
             case "OrderPartiallyFilled":
             {
                 var m = Read<OrderPartiallyFilledMessage>();

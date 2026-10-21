@@ -15,6 +15,7 @@ const labels: Record<string, string> = {
   remainingQuantity: 'Quantidade restante',
   executedQuantity: 'Quantidade executada',
   executionPrice: 'Preço de execução',
+  reason: 'Motivo',
 };
 
 @Component({
@@ -59,7 +60,7 @@ export class HistoryDialog implements OnInit, AfterViewInit {
 
   protected details(entry: OrderHistoryEntry): { label: string; value: string }[] {
     return Object.entries(entry.data)
-      .filter(([key]) => !hiddenKeys.has(key))
+      .filter(([key, value]) => !hiddenKeys.has(key) && value != null)
       .map(([key, value]) => ({ label: labels[key] ?? key, value: String(value) }));
   }
 }
