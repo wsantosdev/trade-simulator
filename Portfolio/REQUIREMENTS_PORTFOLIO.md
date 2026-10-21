@@ -45,9 +45,9 @@ Todas exigem quantidade maior que zero e no máximo 1.000.000 (teto universal). 
 
 Toda a comunicação assíncrona usa `EventEnvelope<T>` (o mesmo de Ordens), que deve carregar um **id de envelope** (GUID v7) único por operação (será adicionado `Id` ao `EventEnvelope` de Ordens, mantendo um único tipo de envelope).
 
-- Exchange de comandos: `trading-simulator.portfolio.command` (topic, durável). Fila única de comandos: `trading-simulator.portfolio.asset.commands` (sugestão, seguindo `trading-simulator.<consumidor>.<assunto>`), vinculada com `#`.
+- Exchange de comandos: `trade-simulator.portfolio.command` (topic, durável). Fila única de comandos: `trade-simulator.portfolio.asset.commands` (sugestão, seguindo `trade-simulator.<consumidor>.<assunto>`), vinculada com `#`.
 - O produtor dos comandos (Exchange ou Ordens) ainda será definido.
-- Respostas: exchange `trading-simulator.portfolio.events` (topic), routing keys `asset.command.succeeded` e `asset.command.failed`.
+- Respostas: exchange `trade-simulator.portfolio.events` (topic), routing keys `asset.command.succeeded` e `asset.command.failed`.
 - Mensagem inválida (JSON malformado, id/ticker/quantidade inválidos) gera resposta de erro tipada, equivalente ao 400 da API HTTP; `PortfolioCommandError` tem uma propriedade com o conteúdo bruto (JSON malformado) recebido.
 
 Comandos recebidos (todos com `AccountId`, `Ticker` e `Quantity`):
@@ -60,9 +60,9 @@ Comandos recebidos (todos com `AccountId`, `Ticker` e `Quantity`):
 Integração com Ordens:
 
 - Ao receber `OrderSubmitted` (antes `OrderSent`): se a ordem for de **venda**, bloqueia a quantidade da ordem; se for de **compra**, o evento é descartado.
-- A resposta é `EventEnvelope<Result<AssetsBlocked, AssetBlockError>>` (com `OrderId`) publicada, via outbox, na exchange `trading-simulator.portfolio.reservations` (routing keys `assets.blocked` / `assets.block.failed`). `AssetBlockError.Kind`: `InsufficientQuantity`, `AssetNotFound` ou `InvalidOrder`.
+- A resposta é `EventEnvelope<Result<AssetsBlocked, AssetBlockError>>` (com `OrderId`) publicada, via outbox, na exchange `trade-simulator.portfolio.reservations` (routing keys `assets.blocked` / `assets.block.failed`). `AssetBlockError.Kind`: `InsufficientQuantity`, `AssetNotFound` ou `InvalidOrder`.
 - A reserva por ordem fica na tabela `order_reservations` (`order_id`, conta, ticker, bloqueado, restante, fechada), gravada na mesma transação do `Block`.
-- Eventos do Exchange (exchange `trading-simulator.exchange.order.events`, fila `trading-simulator.portfolio.exchange.events`): `OrderPartiallyFilled`/`OrderFilled` → `Withdraw` da quantidade executada (limitada ao restante); fill final, `OrderCancelled` e `OrderRejected` → `Unblock` da sobra e fechamento da reserva. Idempotência por `processed_order_events` + lease Redis.
+- Eventos do Exchange (exchange `trade-simulator.exchange.order.events`, fila `trade-simulator.portfolio.exchange.events`): `OrderPartiallyFilled`/`OrderFilled` → `Withdraw` da quantidade executada (limitada ao restante); fill final, `OrderCancelled` e `OrderRejected` → `Unblock` da sobra e fechamento da reserva. Idempotência por `processed_order_events` + lease Redis.
 - Evento do Exchange sem reserva ainda gravada: reentrega curta (exceção, até 5 tentativas) e depois descarte com log.
 - Compra: execução de compra (`Deposit`) não faz parte deste fluxo; a compra é descartada.
 

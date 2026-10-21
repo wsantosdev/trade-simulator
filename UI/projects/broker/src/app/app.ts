@@ -12,7 +12,7 @@ import { WINDOW_KINDS, WINDOW_SPECS, WindowKind } from './workspace/window-model
   template: `
     <div class="flex h-screen flex-col bg-[#f6f8f7] text-slate-900">
       <header class="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3">
-        <a class="flex items-center gap-2" href="/" aria-label="Trading Simulator início">
+        <a class="flex items-center gap-2" href="/" aria-label="Trade Simulator início">
           <span class="grid size-9 shrink-0 place-items-center rounded-xl bg-emerald-700 text-white shadow-sm">
             <svg viewBox="0 0 24 24" fill="none" class="size-5" aria-hidden="true">
               <path d="M4 17.5 9 12l3.5 3 7.5-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -20,7 +20,7 @@ import { WINDOW_KINDS, WINDOW_SPECS, WindowKind } from './workspace/window-model
             </svg>
           </span>
           <span class="hidden sm:block">
-            <span class="block text-sm font-bold leading-4 tracking-tight">Trading Simulator</span>
+            <span class="block text-sm font-bold leading-4 tracking-tight">Trade Simulator</span>
             <span class="block text-xs text-slate-500">Home broker</span>
           </span>
         </a>

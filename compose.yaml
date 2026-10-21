@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: tradingsimulator
+      POSTGRES_DB: tradesimulator
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres-local
     ports:
@@ -11,22 +11,22 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./database/init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d tradingsimulator"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tradesimulator"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  tradingsimulator-account:
-    image: tradingsimulator-account
+  tradesimulator-account:
+    image: tradesimulator-account
     build:
       context: .
-      dockerfile: Account/TradingSimulator.Account/Dockerfile
+      dockerfile: Account/TradeSimulator.Account/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Accounts: Host=postgres;Port=5432;Database=tradingsimulator;Username=account;Password=account-local;Search Path=account
+      ConnectionStrings__Accounts: Host=postgres;Port=5432;Database=tradesimulator;Username=account;Password=account-local;Search Path=account
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
-      OfferBook__BaseUrl: http://tradingsimulator-offerbook:8080
+      OfferBook__BaseUrl: http://tradesimulator-offerbook:8080
     stop_grace_period: 40s
     ports:
       - "8080:8080"
@@ -36,16 +36,16 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  tradingsimulator-orders:
-    image: tradingsimulator-orders
+  tradesimulator-orders:
+    image: tradesimulator-orders
     build:
       context: .
-      dockerfile: Orders/TradingSimulator.Orders/Dockerfile
+      dockerfile: Orders/TradeSimulator.Orders/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       Simulation__SessionClockOffset: ${EXCHANGE_SESSION_CLOCK_OFFSET:-00:00:00}
-      ConnectionStrings__Orders: Host=postgres;Port=5432;Database=tradingsimulator;Username=orders;Password=orders-local;Search Path=orders
+      ConnectionStrings__Orders: Host=postgres;Port=5432;Database=tradesimulator;Username=orders;Password=orders-local;Search Path=orders
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
     ports:
@@ -56,17 +56,17 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  tradingsimulator-exchange:
-    image: tradingsimulator-exchange
+  tradesimulator-exchange:
+    image: tradesimulator-exchange
     build:
       context: .
-      dockerfile: Exchange/TradingSimulator.Exchange/Dockerfile
+      dockerfile: Exchange/TradeSimulator.Exchange/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       Simulation__SessionClockOffset: ${EXCHANGE_SESSION_CLOCK_OFFSET:-00:00:00}
       Seed__Directory: /seed
-      ConnectionStrings__Exchange: Host=postgres;Port=5432;Database=tradingsimulator;Username=exchange;Password=exchange-local;Search Path=exchange
+      ConnectionStrings__Exchange: Host=postgres;Port=5432;Database=tradesimulator;Username=exchange;Password=exchange-local;Search Path=exchange
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
     volumes:
@@ -79,11 +79,11 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  tradingsimulator-quotes:
-    image: tradingsimulator-quotes
+  tradesimulator-quotes:
+    image: tradesimulator-quotes
     build:
       context: .
-      dockerfile: Quotes/TradingSimulator.Quotes/Dockerfile
+      dockerfile: Quotes/TradeSimulator.Quotes/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
@@ -94,11 +94,11 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  tradingsimulator-offerbook:
-    image: tradingsimulator-offerbook
+  tradesimulator-offerbook:
+    image: tradesimulator-offerbook
     build:
       context: .
-      dockerfile: OfferBook/TradingSimulator.OfferBook/Dockerfile
+      dockerfile: OfferBook/TradeSimulator.OfferBook/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
@@ -109,15 +109,15 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  tradingsimulator-portfolio:
-    image: tradingsimulator-portfolio
+  tradesimulator-portfolio:
+    image: tradesimulator-portfolio
     build:
       context: .
-      dockerfile: Portfolio/TradingSimulator.Portfolio/Dockerfile
+      dockerfile: Portfolio/TradeSimulator.Portfolio/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Portfolio: Host=postgres;Port=5432;Database=tradingsimulator;Username=portfolio;Password=portfolio-local;Search Path=portfolio
+      ConnectionStrings__Portfolio: Host=postgres;Port=5432;Database=tradesimulator;Username=portfolio;Password=portfolio-local;Search Path=portfolio
       ConnectionStrings__Redis: redis:6379
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
@@ -156,7 +156,7 @@ services:
       retries: 5
 
   ui:
-    image: tradingsimulator-ui
+    image: tradesimulator-ui
     build:
       context: UI
     ports:
@@ -164,12 +164,12 @@ services:
       - "4201:4201"
       - "4204:4204"
     depends_on:
-      - tradingsimulator-account
-      - tradingsimulator-orders
-      - tradingsimulator-exchange
-      - tradingsimulator-quotes
-      - tradingsimulator-offerbook
-      - tradingsimulator-portfolio
+      - tradesimulator-account
+      - tradesimulator-orders
+      - tradesimulator-exchange
+      - tradesimulator-quotes
+      - tradesimulator-offerbook
+      - tradesimulator-portfolio
 
 volumes:
   postgres-data:

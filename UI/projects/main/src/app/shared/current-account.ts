@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 
-const storageKey = 'trading-simulator.account-id';
+const storageKey = 'trade-simulator.account-id';
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Conta carregada na Conta corrente; vale para todas as telas e sobrevive a recarregamentos da aba. */

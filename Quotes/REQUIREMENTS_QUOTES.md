@@ -5,12 +5,12 @@ Serves real-time quotes to the UIs. It has no database: the last quote of each t
 ## Flow
 
 1. The Exchange simulates one quote per second for each ticker that has subscribers (see `Exchange/REQUIREMENTS_EXCHANGE.md`)
-   and publishes `EventEnvelope<Quote>` to the topic exchange `trading-simulator.exchange.quote.events`
+   and publishes `EventEnvelope<Quote>` to the topic exchange `trade-simulator.exchange.quote.events`
    (routing key `quote.{TICKER}`, transient).
-2. This module consumes queue `trading-simulator.quotes.quote.events` (durable queue (RabbitMQ 4 forbids transient shared queues) with TTL 10 s, max 10,000 messages,
+2. This module consumes queue `trade-simulator.quotes.quote.events` (durable queue (RabbitMQ 4 forbids transient shared queues) with TTL 10 s, max 10,000 messages,
    auto-ack: quotes are perishable), keeps the last quote per ticker and pushes `QuoteUpdated` to SignalR group `ticker-{TICKER}`.
 3. Subscribers are tracked per connection. When a ticker gets its first subscriber, and every 5 s, the module publishes
-   `EventEnvelope<QuoteInterestRenewed(Tickers)>` to `trading-simulator.quotes.interest.events`.
+   `EventEnvelope<QuoteInterestRenewed(Tickers)>` to `trade-simulator.quotes.interest.events`.
    The Exchange stops simulating a ticker 15 s after the last renewal.
 
 ## Contract

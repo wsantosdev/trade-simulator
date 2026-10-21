@@ -1,0 +1,1 @@
+global using FundsReservationResponse = TradeSimulator.Commons.EventEnvelope<Moonad.Result<TradeSimulator.Account.Infrastructure.Messaging.FundsReservedMessage, TradeSimulator.Account.Infrastructure.Messaging.FundsReservationError>>;

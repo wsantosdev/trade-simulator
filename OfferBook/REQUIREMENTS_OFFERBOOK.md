@@ -14,16 +14,16 @@ Serve o livro de ofertas em tempo real às UIs. Não tem banco: o livro de cada 
 
 ## Fluxo
 
-1. O Exchange publica `EventEnvelope<OfferBookSnapshot|OfferBookDelta>` no topic `trading-simulator.exchange.offerbook.events`
+1. O Exchange publica `EventEnvelope<OfferBookSnapshot|OfferBookDelta>` no topic `trade-simulator.exchange.offerbook.events`
    (routing key `offerbook.{TICKER}`, transiente).
-2. Este módulo consome a fila `trading-simulator.offerbook.book.events` (durável, TTL 10 s, máx. 10.000 mensagens, auto-ack, binding `offerbook.*`).
+2. Este módulo consome a fila `trade-simulator.offerbook.book.events` (durável, TTL 10 s, máx. 10.000 mensagens, auto-ack, binding `offerbook.*`).
 3. `OfferBookProcessor`: snapshot -> guarda em `LatestOfferBooks` e repassa ao grupo SignalR `ticker-{TICKER}`;
    delta -> aplica e repassa se contíguo (`previousSequence` == última sequence).
 4. Lacuna de sequência: a base é descartada e um `OfferBookSnapshotRequested` é publicado. Delta antes do primeiro snapshot é ignorado,
    mas pede snapshot (no máximo 1 pedido por ticker a cada 2 s). Delta com `sequence` <= à atual é ignorado (atrasado/duplicado).
 5. Assinantes são rastreados por conexão. No primeiro assinante de um ticker, e a cada 5 s, publica `OfferBookInterestRenewed(Tickers)`;
    no primeiro assinante também publica `OfferBookSnapshotRequested(Ticker)`.
-   Saída: exchange `trading-simulator.offerbook.interest.events` (routing key `interest`); fila `trading-simulator.exchange.offerbook.interest`
+   Saída: exchange `trade-simulator.offerbook.interest.events` (routing key `interest`); fila `trade-simulator.exchange.offerbook.interest`
    (durável, TTL 15 s) declarada e ligada (`#`) também por este módulo.
 
 ## Contrato (JSON camelCase, enums como string, envelope `{ id, eventType, event }`)

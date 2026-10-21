@@ -23,9 +23,9 @@
 
 ## Provisionamento por ordem (mensageria)
 
-- A conta consome `OrderSubmitted` (fila durável `trading-simulator.account.order.submitted`; o binding/fila antiga `trading-simulator.account.order.commands` foi abandonada); ordens de venda são descartadas.
+- A conta consome `OrderSubmitted` (fila durável `trade-simulator.account.order.submitted`; o binding/fila antiga `trade-simulator.account.order.commands` foi abandonada); ordens de venda são descartadas.
 - Compra limitada provisiona `quantidade × preço`; compra a mercado provisiona `quantidade × melhor ask do OfferBook × 1,05`, arredondado para cima ao centavo. Sem preço disponível, a reserva falha com `PriceUnavailable`.
-- O resultado é publicado no exchange `trading-simulator.account.reservations` (`funds.reserved` / `funds.reservation.failed`) como `Result` (`isError`, `result`/`error`), via outbox transacional.
+- O resultado é publicado no exchange `trade-simulator.account.reservations` (`funds.reserved` / `funds.reservation.failed`) como `Result` (`isError`, `result`/`error`), via outbox transacional.
 - Cada ordem tem uma reserva própria (`order_reservations`), atualizada na mesma transação dos eventos da conta.
 - `OrderPartiallyFilled`/`OrderFilled` debitam o valor executado do provisionado (`FundsDebited`); no `OrderFilled` a sobra volta ao disponível (`FundsReleased`).
 - `OrderCancelled`/`OrderRejected` liberam o restante provisionado para o disponível.

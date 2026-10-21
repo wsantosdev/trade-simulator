@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
 
-const suffix = ' | Trading Simulator';
+const suffix = ' | Trade Simulator';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'account' },

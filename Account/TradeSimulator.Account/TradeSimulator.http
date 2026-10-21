@@ -1,0 +1,6 @@
+@TradeSimulator_HostAddress = http://localhost:5022
+
+GET {{TradeSimulator_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

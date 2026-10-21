@@ -1,0 +1,60 @@
+<Solution>
+  <Folder Name="/Account/">
+    <File Path="Account/REQUIREMENTS_ACCOUNT.md" />
+    <File Path="Account/TradeSimulator.Account/Dockerfile" />
+    <Project Path="Account/TradeSimulator.Account/TradeSimulator.Account.csproj" />
+    <Project Path="Account/TradeSimulator.Account.Tests/TradeSimulator.Account.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Exchange/">
+    <File Path="Exchange/REQUIREMENTS_EXCHANGE.md" />
+    <File Path="Exchange/TradeSimulator.Exchange/Dockerfile" />
+    <Project Path="Exchange/TradeSimulator.Exchange/TradeSimulator.Exchange.csproj" />
+    <Project Path="Exchange/TradeSimulator.Exchange.Tests/TradeSimulator.Exchange.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Quotes/">
+    <File Path="Quotes/REQUIREMENTS_QUOTES.md" />
+    <File Path="Quotes/TradeSimulator.Quotes/Dockerfile" />
+    <Project Path="Quotes/TradeSimulator.Quotes/TradeSimulator.Quotes.csproj" />
+    <Project Path="Quotes/TradeSimulator.Quotes.Tests/TradeSimulator.Quotes.Tests.csproj" />
+  </Folder>
+  <Folder Name="/OfferBook/">
+    <File Path="OfferBook/REQUIREMENTS_OFFERBOOK.md" />
+    <File Path="OfferBook/TradeSimulator.OfferBook/Dockerfile" />
+    <Project Path="OfferBook/TradeSimulator.OfferBook/TradeSimulator.OfferBook.csproj" />
+    <Project Path="OfferBook/TradeSimulator.OfferBook.Tests/TradeSimulator.OfferBook.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Shared/">
+    <Project Path="Shared/TradeSimulator.Commons/TradeSimulator.Commons.csproj" />
+    <Project Path="Shared/TradeSimulator.Testing/TradeSimulator.Testing.csproj" />
+  </Folder>
+  <Folder Name="/Orders/">
+    <File Path="Orders/REQUIREMENTS_ORDERS.md" />
+    <File Path="Orders/TradeSimulator.Orders/Dockerfile" />
+    <Project Path="Orders/TradeSimulator.Orders/TradeSimulator.Orders.csproj" />
+    <Project Path="Orders/TradeSimulator.Orders.Tests/TradeSimulator.Orders.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Portfolio/">
+    <File Path="Portfolio/REQUIREMENTS_PORTFOLIO.md" />
+    <File Path="Portfolio/TradeSimulator.Portfolio/Dockerfile" />
+    <Project Path="Portfolio/TradeSimulator.Portfolio/TradeSimulator.Portfolio.csproj" />
+    <Project Path="Portfolio/TradeSimulator.Portfolio.Tests/TradeSimulator.Portfolio.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="compose.yaml" />
+    <File Path="database/init-schemas.sql" />
+    <File Path="PATTERNS.md" />
+    <File Path="UI.md" />
+    <File Path="Account/TradeSimulator.Account/Infrastructure/Database/schema.sql" />
+  </Folder>
+  <Folder Name="/UI/">
+    <File Path="UI/angular.json" />
+    <File Path="UI/Dockerfile" />
+    <File Path="UI/nginx.conf" />
+    <File Path="UI/hub.conf" />
+    <File Path="UI/package.json" />
+    <File Path="UI/proxy.main.conf.json" />
+    <File Path="UI/proxy.broker.conf.json" />
+    <File Path="UI/proxy.exchange.conf.json" />
+    <File Path="UI/tsconfig.json" />
+  </Folder>
+</Solution>

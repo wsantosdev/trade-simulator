@@ -1,4 +1,4 @@
-# Trading Simulator
+# Trade Simulator
 
 Simulador de negociação de ações da bolsa brasileira (B3). O usuário abre uma conta corrente, deposita dinheiro, envia ordens de compra e venda, acompanha cotações e o livro de ofertas em tempo real e vê sua carteira de ativos mudar conforme as ordens são executadas.
 
@@ -18,7 +18,7 @@ Cada módulo é um microsserviço .NET 10 independente, com seu próprio projeto
 | **OfferBook** | 8085 | Livro de ofertas em tempo real, via SignalR. |
 | **UI** | 4200 / 4201 / 4204 | Angular. App principal em `4200` (conta, ordens, carteira, cotações, livro); home broker com janelas flutuantes em `4201`; UI da bolsa em `4204`. |
 
-`Shared/TradingSimulator.Commons` contém apenas o que é comum aos serviços na comunicação: `EventEnvelope<T>` e conversores JSON.
+`Shared/TradeSimulator.Commons` contém apenas o que é comum aos serviços na comunicação: `EventEnvelope<T>` e conversores JSON.
 
 ## Como funciona
 
@@ -52,7 +52,7 @@ As regras completas estão em [`PATTERNS.md`](PATTERNS.md) (e as de interface em
 ## Estrutura de um módulo
 
 ```text
-TradingSimulator.<Modulo>/
+TradeSimulator.<Modulo>/
 ├── Program.cs            raiz de composição
 ├── Common/               portas e contratos usados por features e processors
 ├── Domain/               Entities, ValueObjects, Enums, Events, erros
@@ -94,8 +94,8 @@ As credenciais acima são **somente para desenvolvimento local**. Cada serviço 
 
 A Exchange precisa de instrumentos e cotações históricas da B3. Os arquivos não são versionados; baixe-os do site da B3 e importe-os pela linha de comando (de propósito não existe endpoint HTTP para isso):
 
-- **Instrumentos** (arquivo `BVBG.028`, XML): `dotnet run --project Exchange/TradingSimulator.Exchange -- --import-instruments <caminho do XML>`
-- **Cotações históricas** (arquivo `COTAHIST`, TXT): `dotnet run --project Exchange/TradingSimulator.Exchange -- --import-quotes <caminho do TXT>`
+- **Instrumentos** (arquivo `BVBG.028`, XML): `dotnet run --project Exchange/TradeSimulator.Exchange -- --import-instruments <caminho do XML>`
+- **Cotações históricas** (arquivo `COTAHIST`, TXT): `dotnet run --project Exchange/TradeSimulator.Exchange -- --import-quotes <caminho do TXT>`
 
 **Carga automática na inicialização:** coloque os arquivos (`BVBG*.xml` e `COTAHIST*.TXT`/`COTACOES_*.TXT`) em `data/b3/` (ou aponte outra pasta com `EXCHANGE_SEED_DIR`). Ao subir, a Exchange importa, em segundo plano, o arquivo mais recente de cada tipo, mas só para tabelas ainda vazias; portanto reiniciar não reimporta. A API fica disponível durante a carga. Fora do Docker, defina `Seed__Directory`.
 
@@ -120,7 +120,7 @@ O servidor de desenvolvimento faz proxy de `/api` e `/hubs` para os serviços (v
 ### Testes
 
 ```sh
-dotnet test TradingSimulator.slnx     # serviços .NET
+dotnet test TradeSimulator.slnx     # serviços .NET
 cd UI && npm test                     # UI
 ```
 

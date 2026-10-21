@@ -4,7 +4,7 @@ As diretrizes a seguir devem ser observadas durante o desenvolvimento do projeto
 
 ## Arquitetura e organização
 
-- A solution principal deve se chamar `TradingSimulator.slnx`. Organize a solução em **solution folders por módulo de negócio**; cada pasta de módulo representa uma fronteira de microsserviço e contém o projeto executável desse microsserviço, seus projetos de teste e os projetos/arquivos de interface relacionados. Exemplo: `/Account/` contém `TradingSimulator.Account`, `TradingSimulator.Account.Tests` e `Account UI`. Ao iniciar um novo módulo, crie uma nova solution folder e seu projeto de microsserviço independente, sem agrupar projetos de módulos distintos na mesma pasta.
+- A solution principal deve se chamar `TradeSimulator.slnx`. Organize a solução em **solution folders por módulo de negócio**; cada pasta de módulo representa uma fronteira de microsserviço e contém o projeto executável desse microsserviço, seus projetos de teste e os projetos/arquivos de interface relacionados. Exemplo: `/Account/` contém `TradeSimulator.Account`, `TradeSimulator.Account.Tests` e `Account UI`. Ao iniciar um novo módulo, crie uma nova solution folder e seu projeto de microsserviço independente, sem agrupar projetos de módulos distintos na mesma pasta.
 - Utilize **Ports & Adapters (Hexagonal)** de forma estrita (referência: módulo Orders). Regras:
   - **Domain** é puro: sem referência a framework, serialização, banco ou mensageria.
   - **Portas de entrada (inbound)** são interfaces que expõem um manipulador (handler) de comando ou consulta (`ISubmitOrder`, `ICancelOrder`, `IQueryOrders`, `IQueryOrderHistory`), recebem comandos/valores tipados e retornam `Result<T, IError>`. Ficam no mesmo arquivo do caso de uso que as implementa.
@@ -22,7 +22,7 @@ As diretrizes a seguir devem ser observadas durante o desenvolvimento do projeto
   - `Processors/<CasoDeUso>/` (o lado worker: reações a mensagens recebidas de outros módulos; Orders `FundsReservation`, `AssetReservation`, `OrderTransition`; Account `OrderFunds`; Portfolio `PortfolioCommands`; Exchange `OrderCommands`, `OfferBook`, `Quotes`; Quotes `QuoteUpdates`, `QuoteInterest`; OfferBook `OfferBookUpdates`, `OfferBookInterest`): cada pasta é um caso de uso acionado por mensagem, com seu processor, suas portas e os tipos neutros que ele recebe. Os consumidores e os `*MessageHandler` em `Infrastructure/Messaging` fazem o parse (envelope, JSON, contratos `*Message`), descartam mensagens malformadas e entregam valores tipados ao processor; os adaptadores de saída montam os envelopes. `Processors` nunca importa `Infrastructure` nem `Features`. Serviços usados só pelos processors (como `OrderTransitions`) ficam na pasta do caso de uso que os usa.
   - `Simulation/` (quando houver): geração de dados sintéticos (como a simulação de pregão do Exchange); não é domínio nem infraestrutura.
   - `Infrastructure/Database`, `Infrastructure/Messaging`, `Infrastructure/Realtime`, `Infrastructure/Http`, `Infrastructure/Serialization` (e outras pastas por função, como `Sources`, `Simulation` ou `Idempotency`, quando houver): agrupados pelo que cada componente faz.
-  - Namespaces seguem as pastas (`TradingSimulator.Orders.Features.SubmitOrder`).
+  - Namespaces seguem as pastas (`TradeSimulator.Orders.Features.SubmitOrder`).
 - Mantenha cada evento de domínio em um arquivo próprio em `Domain/Events`, com namespace `<Projeto>.Domain.Events`.
 - Mantenha cada porta em seu próprio arquivo, nomeado pelo tipo da porta, quando ela for compartilhada (`IOrderStore.cs`, `IOutbox.cs`); tipos de contrato usados por essas portas (como `PendingEvent`) também têm arquivo próprio. Não agrupe múltiplas portas em um arquivo `*Ports.cs`.
 - Utilize **agregados** para definir fronteiras transacionais e proteger as invariantes do domínio.
@@ -32,7 +32,7 @@ As diretrizes a seguir devem ser observadas durante o desenvolvimento do projeto
 Estrutura de referência (módulo Orders):
 
 ```text
-TradingSimulator.Orders/
+TradeSimulator.Orders/
 ├── Program.cs
 ├── Common/ (IOrderStore, IOrderNotifier, OrderView e OrderChanges)
 ├── Domain/
@@ -93,7 +93,7 @@ TradingSimulator.Orders/
 
 ## Observabilidade
 
-- Use **OpenTelemetry** (traces e métricas). A infraestrutura compartilhada fica em `Shared/TradingSimulator.Commons/Telemetry`; cada módulo declara apenas `Infrastructure/Telemetry/<Modulo>Telemetry.cs` (`ServiceTelemetry`, `ActivitySource` e `Meter` próprios) e `<Modulo>Metrics.cs`.
+- Use **OpenTelemetry** (traces e métricas). A infraestrutura compartilhada fica em `Shared/TradeSimulator.Commons/Telemetry`; cada módulo declara apenas `Infrastructure/Telemetry/<Modulo>Telemetry.cs` (`ServiceTelemetry`, `ActivitySource` e `Meter` próprios) e `<Modulo>Metrics.cs`.
 - `Domain`, `Features`, `Processors` e `Common` não importam `Infrastructure` nem OpenTelemetry. Métricas de negócio são emitidas por uma porta de saída `I<Modulo>Metrics` implementada em `Infrastructure/Telemetry`; `ActivitySource` e `Meter` (BCL) são usados apenas na infraestrutura.
 - Propague o `traceparent` nas mensagens: o publisher cria um span `Producer` e grava o header; o consumer cria um span `Consumer` a partir dele. Em módulos com outbox, a coluna `traceparent` guarda o contexto até a publicação. O `correlation.id` vira tag do span da requisição.
 - Rótulos de métricas são **conjuntos fechados** (resultado, tipo, fila). Nunca use ids, tickers, preços, quantidades, saldos ou dados pessoais como rótulo ou tag; textos vindos de outro serviço só viram rótulo após whitelist.

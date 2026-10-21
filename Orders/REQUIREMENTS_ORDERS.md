@@ -63,9 +63,9 @@
 
 ## Validação interna: provisionamento de saldo (compra) e bloqueio de ativos (venda)
 
-- O módulo de Ordens **não solicita** o provisionamento: a Conta escuta o evento **OrderSubmitted** (compras; vendas são descartadas) e responde com `EventEnvelope<Result<FundsReserved, FundsReservationError>>` no exchange `trading-simulator.account.reservations` (fila durável `trading-simulator.orders.account.events`, binding `#`).
-- O Portfólio escuta **OrderSubmitted** (vendas; compras são descartadas), bloqueia a quantidade do ativo e responde com `EventEnvelope<Result<AssetsBlocked, AssetBlockError>>` no exchange topic durável `trading-simulator.portfolio.reservations` (routing key `assets.blocked` / `assets.block.failed`; fila durável do módulo `trading-simulator.orders.portfolio.events`). `AssetBlockError.kind` (texto) = `InsufficientQuantity`, `AssetNotFound` ou `InvalidOrder`.
-- Sucesso (`FundsReserved` ou `AssetsBlocked`) com a ordem em **PendingDispatching**: grava **OrderDispatched** (→ **PendingNew**) e o publica pela outbox no exchange `trading-simulator-order-commands`; só então o Exchange vê a ordem. Sucesso duplicado ou para ordem em outro estado/desconhecida: ignorado com log (ack).
+- O módulo de Ordens **não solicita** o provisionamento: a Conta escuta o evento **OrderSubmitted** (compras; vendas são descartadas) e responde com `EventEnvelope<Result<FundsReserved, FundsReservationError>>` no exchange `trade-simulator.account.reservations` (fila durável `trade-simulator.orders.account.events`, binding `#`).
+- O Portfólio escuta **OrderSubmitted** (vendas; compras são descartadas), bloqueia a quantidade do ativo e responde com `EventEnvelope<Result<AssetsBlocked, AssetBlockError>>` no exchange topic durável `trade-simulator.portfolio.reservations` (routing key `assets.blocked` / `assets.block.failed`; fila durável do módulo `trade-simulator.orders.portfolio.events`). `AssetBlockError.kind` (texto) = `InsufficientQuantity`, `AssetNotFound` ou `InvalidOrder`.
+- Sucesso (`FundsReserved` ou `AssetsBlocked`) com a ordem em **PendingDispatching**: grava **OrderDispatched** (→ **PendingNew**) e o publica pela outbox no exchange `trade-simulator-order-commands`; só então o Exchange vê a ordem. Sucesso duplicado ou para ordem em outro estado/desconhecida: ignorado com log (ack).
 - Erro (`FundsReservationError` ou `AssetBlockError`; `kind` da Conta = `InsufficientFunds`, `AccountNotFound`, `PriceUnavailable` ou `InvalidOrder`) com a ordem em **PendingDispatching**: **Rejected** localmente (motivo = `kind`, gravado em `OrderRejected`). Nada é publicado ao Exchange (a ordem nunca foi despachada) e **não** há OrderCancelRequested. Erro para ordem em outro estado é ignorado com log.
 - Ordem **limitada**: o valor a provisionar é **quantidade × preço limite**.
 - Ordem **a mercado**: o único parâmetro informado é a **quantidade**; a Conta calcula o valor a partir da melhor oferta de venda do OfferBook com margem de 5%.
@@ -178,7 +178,7 @@
 - Todos os eventos do sistema trafegam em JSON dentro de um **envelope genérico** `EventEnvelope<T>` (primeira versão), com:
   - `EventType`: string com o **nome do tipo do evento** (ex.: `"OrderCancelRejected"`);
   - `Event`: instância de `T` com o conteúdo do evento.
-- Exchange do RabbitMQ: **`trading-simulator.exchange.order.events`**. Fila do módulo de Ordens: **`trading-simulator.orders.order.events`**.
+- Exchange do RabbitMQ: **`trade-simulator.exchange.order.events`**. Fila do módulo de Ordens: **`trade-simulator.orders.order.events`**.
 - Eventos do **Exchange** (aos quais Ordens reage), com payload mínimo:
   - **OrderAcked**: id da ordem.
   - **OrderRejected**: id da ordem.
@@ -224,7 +224,7 @@
 
 ## Comandos publicados por Ordens
 
-- Exchange do RabbitMQ: **`trading-simulator-order-commands`**, recebendo os comandos no mesmo envelope `EventEnvelope<T>`.
+- Exchange do RabbitMQ: **`trade-simulator-order-commands`**, recebendo os comandos no mesmo envelope `EventEnvelope<T>`.
 - Payloads (confirmados): **OrderSubmitted** e **OrderDispatched** (id, conta, ticker, lado, tipo, quantidade, preço), **OrderCancelRequested** (id), **OrderReplaceRequested** (id, novo preço).
 - O preço médio e o preço da última execução vêm do **preço de execução** presente em OrderPartiallyFilled e OrderFilled.
 
@@ -241,9 +241,9 @@
 
 ## Progresso
 
-- Passos 1 e 2 concluídos: domínio, `POST /api/orders`, event store Postgres, outbox e publicação em `trading-simulator-order-commands` (verificado com Postgres/RabbitMQ). Testes de domínio passando.
+- Passos 1 e 2 concluídos: domínio, `POST /api/orders`, event store Postgres, outbox e publicação em `trade-simulator-order-commands` (verificado com Postgres/RabbitMQ). Testes de domínio passando.
 
-- Passo 3 concluído: consumidor da fila `trading-simulator.orders.order.events` (exchange `trading-simulator.exchange.order.events`, bind `#`), ack manual, reentrega em falha de infraestrutura; eventos inválidos ou transições proibidas são logados e descartados. Event store com `sequence` por ordem (índice único) para concorrência otimista, com retentativa.
+- Passo 3 concluído: consumidor da fila `trade-simulator.orders.order.events` (exchange `trade-simulator.exchange.order.events`, bind `#`), ack manual, reentrega em falha de infraestrutura; eventos inválidos ou transições proibidas são logados e descartados. Event store com `sequence` por ordem (índice único) para concorrência otimista, com retentativa.
 - Domínio já cobre PendingCancel/PendingReplace; os endpoints de cancelar/replace entram no passo 4.
 
 ## Decisões de interpretação do passo 3 (revisar)
