@@ -15,7 +15,6 @@
         <PackageReference Include="Moonad" Version="5.5.1" />
         <PackageReference Include="Npgsql" Version="10.0.3" />
         <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
-        <PackageReference Include="StackExchange.Redis" Version="3.4.5" />
     </ItemGroup>
 
     <ItemGroup>

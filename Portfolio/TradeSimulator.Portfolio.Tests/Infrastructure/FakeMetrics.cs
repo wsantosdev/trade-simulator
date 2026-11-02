@@ -8,7 +8,5 @@ internal sealed class FakeMetrics : IPortfolioMetrics
     public void CommandRejected(string error) { }
     public void ReservationBlocked() { }
     public void ReservationRejected(string kind) { }
-    public void OrderSettled(string eventName) { }
-    public void SettlementDiscarded() { }
-    public void DuplicateEnvelope() { }
+    public void ReservationSettled(string eventName) { }
 }

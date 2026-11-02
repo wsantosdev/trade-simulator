@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using TradeSimulator.Portfolio.Infrastructure.Messaging;
 using TradeSimulator.Testing;
 using Xunit;
 
@@ -10,33 +11,32 @@ namespace TradeSimulator.Portfolio.Tests;
 public sealed class PortfolioIntegrationTests(InfrastructureFixture infrastructure) : IAsyncLifetime
 {
     private ModuleFactory<Program> _factory = null!;
-    private RabbitMqProbe _rabbit = null!;
     private HttpClient _client = null!;
+    private RabbitMqProbe _rabbit = null!;
 
     public async Task InitializeAsync()
     {
         _factory = new ModuleFactory<Program>(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Portfolio"] = await infrastructure.CreateDatabaseAsync(),
-            ["ConnectionStrings:Redis"] = infrastructure.RedisConnection,
             ["ConnectionStrings:Mongo"] = infrastructure.MongoConnection,
             ["Mongo:Database"] = infrastructure.CreateMongoDatabaseName(),
             ["RabbitMq:Uri"] = infrastructure.RabbitMqUri
         });
-        _rabbit = await RabbitMqProbe.ConnectAsync(infrastructure.RabbitMqUri);
-        await _rabbit.ListenAsync("trade-simulator.portfolio.reservations");
         _client = _factory.CreateClient();
+        _rabbit = await RabbitMqProbe.ConnectAsync(infrastructure.RabbitMqUri);
+        await _rabbit.WaitForQueueAsync(OrderEventConsumer.Queue);
     }
 
     public async Task DisposeAsync()
     {
+        await _rabbit.DisposeAsync();
         _client.Dispose();
         await _factory.DisposeAsync();
-        await _rabbit.DisposeAsync();
     }
 
     [Fact]
-    public async Task Deposit_command_from_rabbitmq_is_persisted_in_postgres()
+    public async Task Deposit_is_persisted_and_projected()
     {
         var accountId = Guid.CreateVersion7();
         await DepositAsync(accountId, "PETR4", 100);
@@ -47,7 +47,7 @@ public sealed class PortfolioIntegrationTests(InfrastructureFixture infrastructu
     }
 
     [Fact]
-    public async Task Sell_order_reservation_blocks_assets_synchronously()
+    public async Task Reservation_blocks_assets_synchronously()
     {
         var accountId = Guid.CreateVersion7();
         await DepositAsync(accountId, "PETR4", 100);
@@ -61,17 +61,17 @@ public sealed class PortfolioIntegrationTests(InfrastructureFixture infrastructu
     }
 
     [Fact]
-    public async Task Sell_order_without_position_is_rejected_with_422()
+    public async Task Reservation_without_position_is_rejected_with_404()
     {
         var response = await ReserveAsync(Guid.CreateVersion7(), Guid.CreateVersion7(), 10);
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("AssetNotFound", body.GetProperty("reason").GetString());
     }
 
     [Fact]
-    public async Task Concurrent_sell_orders_never_block_more_than_the_position()
+    public async Task Concurrent_reservations_never_block_more_than_the_position()
     {
         var accountId = Guid.CreateVersion7();
         await DepositAsync(accountId, "PETR4", 100);
@@ -83,44 +83,52 @@ public sealed class PortfolioIntegrationTests(InfrastructureFixture infrastructu
         Assert.Equal(10, asset.GetProperty("available").GetInt64());
     }
 
-    [Fact]
-    public async Task Released_reservation_returns_the_quantity()
+    [Theory]
+    [InlineData("OrderCancelled")]
+    [InlineData("OrderRejected")]
+    [InlineData("OrderScheduleCancelled")]
+    public async Task Order_closing_events_return_the_quantity(string eventType)
     {
         var accountId = Guid.CreateVersion7();
-        var orderId = Guid.CreateVersion7();
+        var reservationId = Guid.CreateVersion7();
         await DepositAsync(accountId, "PETR4", 100);
-        await ReserveAsync(accountId, orderId, 40);
+        await ReserveAsync(accountId, reservationId, 40);
 
-        var released = await _client.DeleteAsync($"/api/order-reservations/{orderId}");
+        await _rabbit.PublishAsync(OrderEventMessages.Exchange, eventType, OrderEventMessages.Cancel(eventType, reservationId));
 
-        Assert.Equal(HttpStatusCode.NoContent, released.StatusCode);
         var asset = await GetAssetAsync(accountId, "PETR4", available: 100);
-        Assert.Equal(100, asset.GetProperty("available").GetInt64());
+        Assert.Equal(0, asset.GetProperty("blocked").GetInt64());
     }
 
-    private Task<HttpResponseMessage> ReserveAsync(Guid accountId, Guid orderId, long quantity) =>
-        _client.PostAsJsonAsync("/api/order-reservations", new { orderId, accountId, ticker = "PETR4", quantity });
+    [Fact]
+    public async Task Fills_withdraw_the_executed_quantity_and_the_final_one_returns_the_leftover()
+    {
+        var accountId = Guid.CreateVersion7();
+        var reservationId = Guid.CreateVersion7();
+        await DepositAsync(accountId, "PETR4", 100);
+        await ReserveAsync(accountId, reservationId, 40);
+        var eventId = Guid.CreateVersion7();
+
+        // The same event delivered twice is settled once.
+        for (var i = 0; i < 2; i++)
+            await _rabbit.PublishAsync(OrderEventMessages.Exchange, "OrderPartiallyFilled",
+                OrderEventMessages.Fill("OrderPartiallyFilled", reservationId, 10, 5m, eventId));
+        var partial = await GetAssetAsync(accountId, "PETR4", available: 60);
+        Assert.Equal(30, partial.GetProperty("blocked").GetInt64());
+
+        await _rabbit.PublishAsync(OrderEventMessages.Exchange, "OrderFilled",
+            OrderEventMessages.Fill("OrderFilled", reservationId, 20, 5m));
+        var asset = await GetAssetAsync(accountId, "PETR4", available: 70);
+        Assert.Equal(0, asset.GetProperty("blocked").GetInt64());
+    }
+
+    private Task<HttpResponseMessage> ReserveAsync(Guid accountId, Guid reservationId, long quantity) =>
+        _client.PostAsJsonAsync("/api/assets/reservations", new { reservationId, accountId, ticker = "PETR4", quantity });
 
     private async Task DepositAsync(Guid accountId, string ticker, long quantity)
     {
-        await _rabbit.WaitForQueueAsync("trade-simulator.portfolio.asset.commands");
-        await _rabbit.PublishAsync("trade-simulator.portfolio.command", "Deposit", JsonSerializer.Serialize(new
-        {
-            id = Guid.CreateVersion7(),
-            eventType = "Deposit",
-            @event = new { accountId, ticker, quantity }
-        }));
-
-        var deadline = DateTime.UtcNow.AddSeconds(20);
-        while (DateTime.UtcNow < deadline)
-        {
-            var response = await _client.GetAsync($"/api/assets/{ticker}?accountId={accountId}");
-            if (response.IsSuccessStatusCode)
-                return;
-            await Task.Delay(100);
-        }
-
-        Assert.Fail("Deposit was not applied within 20s.");
+        var response = await _client.PostAsJsonAsync("/api/assets/deposits", new { accountId, ticker, quantity });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     // The read model is eventually consistent: polls until the asset shows the expected available quantity.

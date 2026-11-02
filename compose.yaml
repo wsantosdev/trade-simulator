@@ -25,19 +25,12 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Accounts: Host=postgres;Port=5432;Database=tradesimulator;Username=tradesimulator;Password=tradesimulator-local;Search Path=account
-      RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
-      OfferBook__BaseUrl: http://tradesimulator-offerbook:8080
-      ConnectionStrings__Redis: redis:6379
     stop_grace_period: 40s
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_started
 
   tradesimulator-orders:
     image: tradesimulator-orders
@@ -50,6 +43,7 @@ services:
       Simulation__SessionClockOffset: ${EXCHANGE_SESSION_CLOCK_OFFSET:-00:00:00}
       Services__Account__BaseUrl: http://tradesimulator-account:8080
       Services__Portfolio__BaseUrl: http://tradesimulator-portfolio:8080
+      OfferBook__BaseUrl: http://tradesimulator-offerbook:8080
       ConnectionStrings__Orders: Host=postgres;Port=5432;Database=tradesimulator;Username=tradesimulator;Password=tradesimulator-local;Search Path=orders
       ConnectionStrings__Mongo: mongodb://mongo:27017
       Mongo__Database: orders
@@ -127,7 +121,6 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Portfolio: Host=postgres;Port=5432;Database=tradesimulator;Username=tradesimulator;Password=tradesimulator-local;Search Path=portfolio
-      ConnectionStrings__Redis: redis:6379
       ConnectionStrings__Mongo: mongodb://mongo:27017
       Mongo__Database: portfolio
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
@@ -138,8 +131,6 @@ services:
       mongo:
         condition: service_healthy
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -155,16 +146,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   rabbitmq:
     image: rabbitmq:4-management-alpine

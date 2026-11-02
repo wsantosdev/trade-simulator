@@ -7,13 +7,8 @@ namespace TradeSimulator.Orders.Infrastructure.Database;
 
 public static class OrderEventSerializer
 {
-    public const string LegacyOpeningType = "OrderSent";
-
     public static EventStore CreateStore() => new(new EventStoreOptions(
-        OrderJson.Options, [typeof(OrderEvent).Assembly])
-    {
-        TypeAliases = new Dictionary<string, string> { [LegacyOpeningType] = nameof(OrderSubmitted) }
-    });
+        OrderJson.Options, [typeof(OrderEvent).Assembly]));
 
     // Only these events are commands for the Exchange; all of them go through the outbox.
     public static bool IsCommand(string eventType) =>

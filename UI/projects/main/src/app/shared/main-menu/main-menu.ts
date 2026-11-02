@@ -22,7 +22,6 @@ export class MainMenu {
 
   protected readonly items: readonly MenuItem[] = [
     { path: '/account', label: 'Conta corrente' },
-    { path: '/account/stream', label: 'Stream da conta' },
     { path: '/orders', label: 'Ordens' },
     { path: '/portfolio', label: 'Portfólio' },
     { path: '/quotes', label: 'Cotações' },

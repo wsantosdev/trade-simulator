@@ -21,16 +21,13 @@
 - O valor provisionado deve ficar indisponível para saques e para o saldo disponível.
 - A conta não pode provisionar um valor maior que seu saldo disponível.
 
-## Provisionamento por ordem (mensageria)
+## Reservas de saldo (HTTP síncrono)
 
-- A conta consome `OrderSubmitted` (fila durável `trade-simulator.account.order.submitted`; o binding/fila antiga `trade-simulator.account.order.commands` foi abandonada); ordens de venda são descartadas.
-- Compra limitada provisiona `quantidade × preço`; compra a mercado provisiona `quantidade × melhor ask do OfferBook × 1,05`, arredondado para cima ao centavo. Sem preço disponível, a reserva falha com `PriceUnavailable`.
-- O resultado é publicado no exchange `trade-simulator.account.reservations` (`funds.reserved` / `funds.reservation.failed`) como `Result` (`isError`, `result`/`error`), via outbox transacional.
-- Cada ordem tem uma reserva própria (`order_reservations`), atualizada na mesma transação dos eventos da conta.
-- `OrderPartiallyFilled`/`OrderFilled` debitam o valor executado do provisionado (`FundsDebited`); no `OrderFilled` a sobra volta ao disponível (`FundsReleased`).
-- `OrderCancelled`/`OrderRejected` liberam o restante provisionado para o disponível.
-- Mensagens são idempotentes pelo id do envelope (`processed_messages`, mesma transação).
-- Eventos de execução sem reserva são reentregues até 5 vezes e então descartados.
+- A Conta **não conhece ordens**: expõe reservas genéricas identificadas por um `reservationId` opaco (Guid v7) escolhido pelo chamador. Não há consumo nem publicação de mensagens.
+- `POST /api/accounts/{id}/reservations` `{reservationId, amount}` reserva o valor (idempotente por `reservationId`; saldo insuficiente → `422`; conta inexistente → `404`; mesmo id em outra conta → `409`). A checagem de saldo e a gravação ocorrem numa única transação Postgres, serializada por conta com `pg_advisory_xact_lock`.
+- A fila `trade-simulator.account.order.events` consome os eventos de ordem publicados por Orders (exchange `trade-simulator.orders.events`); o id da ordem é o `reservationId`. `OrderPartiallyFilled` debita quantidade × preço de execução do provisionado (`FundsDebited`), idempotente pelo id do envelope (guardado em `FundsDebited.OperationId`); `OrderFilled` faz o mesmo e devolve a sobra ao disponível (`FundsReleased`); `OrderCancelled`, `OrderRejected` e `OrderScheduleCancelled` liberam o restante provisionado. Reservas desconhecidas ou já encerradas são ignoradas.
+- Cada reserva é uma linha em `reservations`, atualizada na mesma transação dos eventos da conta.
+- Quem calcula o valor (limitada: `quantidade × preço`; a mercado: `quantidade × melhor ask × 1,05`, arredondado para cima ao centavo) e dirige o ciclo de vida da reserva a partir dos eventos da Exchange é o módulo de Ordens.
 - A interface da conta atualiza o saldo automaticamente a cada 2 segundos enquanto uma conta está carregada.
 
 ## Invariante de saldo

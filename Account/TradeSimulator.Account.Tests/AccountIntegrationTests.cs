@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using TradeSimulator.Account.Infrastructure.Messaging;
 using TradeSimulator.Testing;
 using Xunit;
 
@@ -10,27 +11,26 @@ namespace TradeSimulator.Account.Tests;
 public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure) : IAsyncLifetime
 {
     private ModuleFactory<Program> _factory = null!;
-    private RabbitMqProbe _rabbit = null!;
     private HttpClient _client = null!;
+    private RabbitMqProbe _rabbit = null!;
 
     public async Task InitializeAsync()
     {
         _factory = new ModuleFactory<Program>(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Accounts"] = await infrastructure.CreateDatabaseAsync(),
-            ["ConnectionStrings:Redis"] = infrastructure.RedisConnection,
             ["RabbitMq:Uri"] = infrastructure.RabbitMqUri
         });
-        _rabbit = await RabbitMqProbe.ConnectAsync(infrastructure.RabbitMqUri);
-        await _rabbit.ListenAsync("trade-simulator.account.reservations");
         _client = _factory.CreateClient();
+        _rabbit = await RabbitMqProbe.ConnectAsync(infrastructure.RabbitMqUri);
+        await _rabbit.WaitForQueueAsync(OrderEventConsumer.Queue);
     }
 
     public async Task DisposeAsync()
     {
+        await _rabbit.DisposeAsync();
         _client.Dispose();
         await _factory.DisposeAsync();
-        await _rabbit.DisposeAsync();
     }
 
     [Fact]
@@ -46,43 +46,7 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
     }
 
     [Fact]
-    public async Task Inserting_an_event_shifts_later_versions_and_rebuilds_the_balance()
-    {
-        var accountId = await OpenAccountAsync();
-        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 100m });
-        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/withdrawals", new { amount = 60m });
-
-        var inserted = await _client.PostAsJsonAsync($"/api/accounts/{accountId}/stream/events",
-            new { position = 3, type = "deposit", amount = 25m });
-        Assert.Equal(HttpStatusCode.OK, inserted.StatusCode);
-
-        var view = await inserted.Content.ReadFromJsonAsync<JsonElement>();
-        var versions = view.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("eventType").GetString()).ToArray();
-        Assert.Equal(["AccountOpened", "MoneyDeposited", "MoneyDeposited", "MoneyWithdrawn"], versions);
-        Assert.Equal(65m, view.GetProperty("availableBalance").GetDecimal());
-        Assert.True(view.GetProperty("inSync").GetBoolean());
-        var account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
-        Assert.Equal(65m, account.GetProperty("availableBalance").GetDecimal());
-    }
-
-    [Fact]
-    public async Task Inserting_an_event_that_invalidates_the_replay_is_rejected_and_changes_nothing()
-    {
-        var accountId = await OpenAccountAsync();
-        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 100m });
-        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/withdrawals", new { amount = 60m });
-
-        var rejected = await _client.PostAsJsonAsync($"/api/accounts/{accountId}/stream/events",
-            new { position = 2, type = "withdrawal", amount = 10m });
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, rejected.StatusCode);
-
-        var view = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}/stream");
-        Assert.Equal(3, view.GetProperty("events").GetArrayLength());
-        Assert.Equal(40m, view.GetProperty("availableBalance").GetDecimal());
-    }
-
-    [Fact]
-    public async Task Order_reservation_reserves_funds_synchronously()
+    public async Task Reservation_reserves_funds_synchronously()
     {
         var accountId = await OpenAccountAsync();
         await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
@@ -96,15 +60,13 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
     }
 
     [Fact]
-    public async Task Order_reservation_without_enough_balance_is_rejected_with_422()
+    public async Task Reservation_without_enough_balance_is_rejected_with_422()
     {
         var accountId = await OpenAccountAsync();
 
         var response = await ReserveAsync(accountId, Guid.CreateVersion7());
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("InsufficientFunds", body.GetProperty("reason").GetString());
     }
 
     [Fact]
@@ -120,32 +82,103 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
         Assert.Equal(0m, account.GetProperty("availableBalance").GetDecimal());
     }
 
-    [Fact]
-    public async Task Released_reservation_returns_the_funds()
+    [Theory]
+    [InlineData("OrderCancelled")]
+    [InlineData("OrderRejected")]
+    [InlineData("OrderScheduleCancelled")]
+    public async Task Order_closing_events_return_the_funds(string eventType)
     {
         var accountId = await OpenAccountAsync();
         await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
         var orderId = Guid.CreateVersion7();
         await ReserveAsync(accountId, orderId);
 
-        var released = await _client.DeleteAsync($"/api/order-reservations/{orderId}");
-        Assert.Equal(HttpStatusCode.NoContent, released.StatusCode);
+        await _rabbit.PublishAsync(OrderEventMessages.Exchange, eventType, OrderEventMessages.Cancel(eventType, orderId));
 
-        var account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
-        Assert.Equal(1_000m, account.GetProperty("availableBalance").GetDecimal());
+        await AssertBalanceAsync(accountId, available: 1_000m, provisioned: 0m);
     }
 
-    private Task<HttpResponseMessage> ReserveAsync(Guid accountId, Guid orderId) =>
-        _client.PostAsJsonAsync("/api/order-reservations", new
+    [Fact]
+    public async Task Partial_fill_debits_the_executed_value_and_keeps_the_rest_reserved()
+    {
+        var accountId = await OpenAccountAsync();
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
+        var orderId = Guid.CreateVersion7();
+        await ReserveAsync(accountId, orderId);
+        var eventId = Guid.CreateVersion7();
+
+        // The same event delivered twice is debited once.
+        for (var i = 0; i < 2; i++)
+            await _rabbit.PublishAsync(OrderEventMessages.Exchange, "OrderPartiallyFilled",
+                OrderEventMessages.Fill("OrderPartiallyFilled", orderId, 4, 10m, eventId));
+
+        await AssertBalanceAsync(accountId, available: 800m, provisioned: 160m);
+    }
+
+    [Fact]
+    public async Task Final_fill_at_a_better_price_releases_the_leftover()
+    {
+        var accountId = await OpenAccountAsync();
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
+        var orderId = Guid.CreateVersion7();
+        await ReserveAsync(accountId, orderId);
+
+        await _rabbit.PublishAsync(OrderEventMessages.Exchange, "OrderFilled",
+            OrderEventMessages.Fill("OrderFilled", orderId, 10, 15m));
+
+        await AssertBalanceAsync(accountId, available: 850m, provisioned: 0m);
+    }
+
+    [Fact]
+    public async Task Events_of_unknown_reservations_are_ignored()
+    {
+        var accountId = await OpenAccountAsync();
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
+        var orderId = Guid.CreateVersion7();
+        await ReserveAsync(accountId, orderId);
+
+        await _rabbit.PublishAsync(OrderEventMessages.Exchange, "OrderFilled",
+            OrderEventMessages.Fill("OrderFilled", Guid.CreateVersion7(), 10, 15m));
+        await _rabbit.PublishAsync(OrderEventMessages.Exchange, "OrderCancelled", OrderEventMessages.Cancel("OrderCancelled", orderId));
+
+        // The unknown fill did not block the queue: the later cancellation was applied.
+        await AssertBalanceAsync(accountId, available: 1_000m, provisioned: 0m);
+    }
+
+    [Fact]
+    public async Task Repeated_reservation_with_the_same_id_does_not_reserve_twice()
+    {
+        var accountId = await OpenAccountAsync();
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
+        var reservationId = Guid.CreateVersion7();
+
+        await ReserveAsync(accountId, reservationId);
+        await ReserveAsync(accountId, reservationId);
+
+        var account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
+        Assert.Equal(800m, account.GetProperty("availableBalance").GetDecimal());
+    }
+
+    private Task<HttpResponseMessage> ReserveAsync(Guid accountId, Guid reservationId) =>
+        _client.PostAsJsonAsync($"/api/accounts/{accountId}/reservations", new { reservationId, amount = 200m });
+
+    // Events are consumed asynchronously: polls until the balances match.
+    private async Task AssertBalanceAsync(Guid accountId, decimal available, decimal provisioned)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        JsonElement account;
+        do
         {
-            orderId,
-            accountId,
-            ticker = "PETR4",
-            side = "Buy",
-            type = "Limit",
-            quantity = 10,
-            price = 20m
-        });
+            account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
+            if (account.GetProperty("availableBalance").GetDecimal() == available
+                && account.GetProperty("provisionedBalance").GetDecimal() == provisioned)
+                return;
+            await Task.Delay(100);
+        } while (DateTime.UtcNow < deadline);
+
+        Assert.Equal(available, account.GetProperty("availableBalance").GetDecimal());
+        Assert.Equal(provisioned, account.GetProperty("provisionedBalance").GetDecimal());
+    }
 
     private async Task<Guid> OpenAccountAsync()
     {

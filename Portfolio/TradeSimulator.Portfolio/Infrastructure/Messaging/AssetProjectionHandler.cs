@@ -1,9 +1,9 @@
 using System.Text.Json;
 using TradeSimulator.Commons;
 using TradeSimulator.Portfolio.Common;
+using TradeSimulator.Portfolio.Domain.ValueObjects;
 using TradeSimulator.Portfolio.Infrastructure.ReadModel;
 using TradeSimulator.Portfolio.Infrastructure.Serialization;
-using TradeSimulator.Portfolio.Processors.PortfolioCommands;
 
 namespace TradeSimulator.Portfolio.Infrastructure.Messaging;
 
@@ -36,7 +36,7 @@ public sealed class AssetProjectionHandler(IAssetStore store, MongoAssetReadMode
 
         await EnsureIndexesAsync(cancellationToken);
 
-        var loaded = await store.LoadAsync(envelope.Event.AssetId, cancellationToken);
+        var loaded = await store.GetAsync(AssetId.TryCreate(envelope.Event.AssetId).ResultValue, cancellationToken);
         if (loaded.IsError)
         {
             logger.LogWarning("Asset {AssetId} could not be loaded for projection: {Error}.", envelope.Event.AssetId, loaded.ErrorValue);
@@ -44,7 +44,7 @@ public sealed class AssetProjectionHandler(IAssetStore store, MongoAssetReadMode
         }
 
         var asset = loaded.ResultValue;
-        if (asset.IsRemoved)
+        if (asset.IsEmpty)
             await readModel.RemoveAsync(envelope.Event.AssetId, asset.Version, cancellationToken);
         else
             await readModel.UpsertAsync(AssetReadModel.From(asset), asset.Version, cancellationToken);

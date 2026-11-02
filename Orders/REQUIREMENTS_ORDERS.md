@@ -50,7 +50,7 @@
 ## Estados da ordem
 
 - Estados: **PendingDispatching** (Despacho pendente), **PendingNew** (Pendente), **New** (Nova), **Parcialmente executada**, **Executada**, **Cancelada** e **Rejeitada**.
-- Agendamento: com o mercado fechado (a bolsa opera 24/7, então `IMarketHours.IsOpen()` é sempre verdadeiro) a ordem, após a reserva de fundos/ativos, vai de **PendingDispatching** para **ScheduledDispatching** (*Agendada*) via **OrderScheduled** (não publicado). A Exchange não conhece agendamento e nunca recebe a ordem nesse estado. Um serviço em segundo plano despacha as agendadas ao abrir o mercado (→ **PendingNew**, fluxo normal). Cancelar uma ordem agendada é local: **OrderScheduleCancelled** (publicado; Account e Portfolio o consomem para liberar os bloqueios) leva a **Cancelled**. Substituição não é permitida enquanto agendada.
+- Agendamento: com o mercado fechado (a bolsa opera 24/7, então `IMarketHours.IsOpen()` é sempre verdadeiro) a ordem, após a reserva de fundos/ativos, vai de **PendingDispatching** para **ScheduledDispatching** (*Agendada*) via **OrderScheduled** (não publicado). A Exchange não conhece agendamento e nunca recebe a ordem nesse estado. Um serviço em segundo plano despacha as agendadas ao abrir o mercado (→ **PendingNew**, fluxo normal). Cancelar uma ordem agendada é local: **OrderScheduleCancelled** (publicado; Portfolio o consome e Orders libera a reserva em Account por HTTP) leva a **Cancelled**. Substituição não é permitida enquanto agendada.
 - Vocabulário: **Submitted = ação do cliente; Dispatched = ação do sistema.** Toda ordem nasce com o evento **OrderSubmitted** em **PendingDispatching** (Despacho pendente); só após a validação interna (Conta/Portfólio) o sistema grava **OrderDispatched** e ela passa a **PendingNew**; vira **New** somente ao receber o *ack* do Exchange.
 - Também existem os estados transitórios **PendingCancel** e **PendingReplace**.
 - Novos estados poderão ser adicionados no futuro.
@@ -63,10 +63,10 @@
 
 ## Validação interna: provisionamento de saldo (compra) e bloqueio de ativos (venda)
 
-- O módulo de Ordens **não solicita** o provisionamento: a Conta escuta o evento **OrderSubmitted** (compras; vendas são descartadas) e responde com `EventEnvelope<Result<FundsReserved, FundsReservationError>>` no exchange `trade-simulator.account.reservations` (fila durável `trade-simulator.orders.account.events`, binding `#`).
-- O Portfólio escuta **OrderSubmitted** (vendas; compras são descartadas), bloqueia a quantidade do ativo e responde com `EventEnvelope<Result<AssetsBlocked, AssetBlockError>>` no exchange topic durável `trade-simulator.portfolio.reservations` (routing key `assets.blocked` / `assets.block.failed`; fila durável do módulo `trade-simulator.orders.portfolio.events`). `AssetBlockError.kind` (texto) = `InsufficientQuantity`, `AssetNotFound` ou `InvalidOrder`.
-- Sucesso (`FundsReserved` ou `AssetsBlocked`) com a ordem em **PendingDispatching**: grava **OrderDispatched** (→ **PendingNew**) e o publica pela outbox no exchange `trade-simulator-order-commands`; só então o Exchange vê a ordem. Sucesso duplicado ou para ordem em outro estado/desconhecida: ignorado com log (ack).
-- Erro (`FundsReservationError` ou `AssetBlockError`; `kind` da Conta = `InsufficientFunds`, `AccountNotFound`, `PriceUnavailable` ou `InvalidOrder`) com a ordem em **PendingDispatching**: **Rejected** localmente (motivo = `kind`, gravado em `OrderRejected`). Nada é publicado ao Exchange (a ordem nunca foi despachada) e **não** há OrderCancelRequested. Erro para ordem em outro estado é ignorado com log.
+- Compras: o módulo de Ordens calcula o valor e reserva os fundos **de forma síncrona** em `POST /api/accounts/{id}/reservations` `{reservationId = id da ordem, amount}` (a Conta desconhece ordens). `422` → `InsufficientFunds`, `404` → `AccountNotFound`, `400/409` → `InvalidOrder`; sem preço no OfferBook (ordem a mercado) → `PriceUnavailable`; Conta indisponível → `503`. Orders não chama Account depois da reserva: os eventos que publica (`OrderPartiallyFilled`/`OrderFilled` debitam quantidade × preço de execução, `OrderCancelled`/`OrderRejected`/`OrderScheduleCancelled` liberam) são consumidos pela Conta; `OrderFilled` também devolve a sobra de uma execução a preço melhor.
+- Vendas: o módulo de Ordens reserva a quantidade **de forma síncrona** em `POST /api/assets/reservations` `{reservationId = id da ordem, accountId, ticker, quantity}` (o Portfólio desconhece ordens). `422` → `InsufficientQuantity`, `404` → `AssetNotFound`, `400/409` → `InvalidOrder`; Portfólio indisponível → `503`. Orders não chama o Portfólio depois da reserva: ele consome os mesmos eventos (execuções retiram a quantidade executada; cancelamento, rejeição e cancelamento agendado liberam o bloqueio).
+- Sucesso (reserva concluída) com a ordem em **PendingDispatching**: grava **OrderDispatched** (→ **PendingNew**) e o publica pela outbox no exchange `trade-simulator-order-commands`; só então o Exchange vê a ordem. Sucesso duplicado ou para ordem em outro estado/desconhecida: ignorado com log (ack).
+- Erro (recusa da reserva síncrona; `kind` da Conta = `InsufficientFunds`, `AccountNotFound`, `PriceUnavailable` ou `InvalidOrder`) com a ordem em **PendingDispatching**: **Rejected** localmente (motivo = `kind`, gravado em `OrderRejected`). Nada é publicado ao Exchange (a ordem nunca foi despachada) e **não** há OrderCancelRequested. Erro para ordem em outro estado é ignorado com log.
 - Ordem **limitada**: o valor a provisionar é **quantidade × preço limite**.
 - Ordem **a mercado**: o único parâmetro informado é a **quantidade**; a Conta calcula o valor a partir da melhor oferta de venda do OfferBook com margem de 5%.
 
@@ -165,7 +165,7 @@
 
 ## Eventos e relação com outros módulos
 
-- O módulo **não emite comandos para a Conta**; a Conta e o Portfólio reagem a **OrderSubmitted** e o módulo de Ordens consome as respostas (`FundsReserved`/`FundsReservationError` e `AssetsBlocked`/`AssetBlockError`).
+- A Conta é acionada por HTTP síncrono (reserva, débito e liberação); o Portfólio também é acionado por HTTP síncrono (reserva, liquidação e liberação de ativos).
 - Eventos **publicados** pelo módulo de Ordens: **OrderSubmitted** (na criação), **OrderDispatched** (no despacho, único que o Exchange consome para abrir ordem), **OrderCancelRequested** e **OrderReplaceRequested**.
 - Os demais eventos (ack, rejeição, execução parcial/total, confirmação de cancelamento e de replace) são **eventos do Exchange**, aos quais o módulo **reage** atualizando a ordem e o *read model*.
 
@@ -235,9 +235,8 @@
 ## Hash anti-duplicidade (aprovado)
 
 - SHA-256 em hexadecimal (64 caracteres) de `conta|ticker|quantidade|preço|timestamp`, gerado na UI no clique e enviado em `requestHash`. Ordem a mercado entra com preço vazio.
-- O servidor apenas valida o formato; índice único no banco. Reenvio devolve a ordem original (idempotência, 201 permanece 201).
-- `OrderSubmitted`/`OrderDispatched` publicados também carregam `requestHash` e `occurredAt`; a idempotência por `requestHash` é gravada no `OrderSubmitted`.
-- Compatibilidade: eventos antigos `OrderSent` já gravados continuam sendo lidos como abertura (OrderSubmitted + despacho implícito → PendingNew), sem migração.
+- O servidor valida o formato e deriva o id da ordem do hash (`OrderId.For`); o índice único `(stream_id, version)` rejeita o reenvio. Reenvio devolve a ordem original (idempotência, 201 permanece 201).
+- `OrderSubmitted`/`OrderDispatched` publicados também carregam `requestHash` e `occurredAt`.
 
 ## Progresso
 

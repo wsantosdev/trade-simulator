@@ -39,7 +39,6 @@ public static class OrderErrorHttpResults
             ConcurrencyConflict => (StatusCodes.Status409Conflict, "Order conflict", "The order was changed concurrently. Try again."),
             ReservationUnavailable => (StatusCodes.Status503ServiceUnavailable, "Reservation unavailable", "Funds or positions could not be validated right now. Try again."),
             OrderNotFound => (StatusCodes.Status404NotFound, "Order not found", "The requested order does not exist."),
-            OrderAlreadyExists => (StatusCodes.Status409Conflict, "Order conflict", "The order already exists."),
             _ => (StatusCodes.Status500InternalServerError, "Order state error", "The order could not be processed.")
         };
 

@@ -89,15 +89,12 @@ public sealed class Order : EventSourcedEntity
         return order;
     }
 
-    // A legacy history opens with OrderSent, which was both the client submission and the dispatch to the Exchange.
-    public static Result<Order, IOrderError> Rehydrate(IReadOnlyList<OrderEvent> history, bool legacyOpening = false)
+    public static Result<Order, IOrderError> Rehydrate(IReadOnlyList<OrderEvent> history)
     {
         if (history.Count == 0 || history[0] is not OrderSubmitted sent)
             return new OrderOpeningEventMissing();
 
         var order = new Order(sent);
-        if (legacyOpening)
-            order.State = OrderState.PendingNew;
         foreach (var @event in history.Skip(1))
         {
             if (@event is OrderSubmitted)

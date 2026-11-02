@@ -12,7 +12,7 @@
 
 - **Orders → Exchange:** envio de ordens, cancelamentos e substituições (detalhes **pendentes**).
 - **Exchange → Orders:** *ack* da ordem (PendingNew → New) e relatórios de execução (totais ou parciais), via RabbitMQ com outbox. Substituição faz a ordem perder prioridade no livro. Execuções ocorridas durante um cancelamento/substituição causam a rejeição desse pedido.
-- **Exchange → Portfolio:** comandos Deposit/Withdraw na exchange `trade-simulator.portfolio.command` (quem os publica ainda será definido: Exchange ou Orders) **(pendente)**.
+- **Exchange → Portfolio:** nenhuma. O Portfólio é acionado por HTTP pelo Orders (reserva e liquidação) e desconhece o Exchange.
 - Módulo de cotações (ordens a mercado): trabalho futuro.
 
 ## Estrutura criada

@@ -2,25 +2,24 @@ using TradeSimulator.Commons.Messaging;
 using TradeSimulator.Outbox;
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
-using StackExchange.Redis;
 using TradeSimulator.Commons.Telemetry;
 using TradeSimulator.Portfolio.Common;
 using MongoDB.Driver;
+using TradeSimulator.Portfolio.Features.DepositAsset;
 using TradeSimulator.Portfolio.Features.GetAsset;
 using TradeSimulator.Portfolio.Infrastructure.ReadModel;
-using TradeSimulator.Portfolio.Features.ReserveSellOrder;
+using TradeSimulator.Portfolio.Processors.ReleaseReservation;
+using TradeSimulator.Portfolio.Features.ReserveAssets;
+using TradeSimulator.Portfolio.Processors.SettleReservation;
 using TradeSimulator.Portfolio.Features.SearchAssets;
 using TradeSimulator.Portfolio.Infrastructure.Database;
-using TradeSimulator.Portfolio.Infrastructure.Idempotency;
 using TradeSimulator.Portfolio.Infrastructure.Messaging;
 using TradeSimulator.Portfolio.Infrastructure.Realtime;
 using TradeSimulator.Portfolio.Infrastructure.Serialization;
 using TradeSimulator.Portfolio.Infrastructure.Telemetry;
-using TradeSimulator.Portfolio.Processors.PortfolioCommands;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Portfolio");
-var redisConnection = builder.Configuration.GetConnectionString("Redis");
 builder.Services.AddOpenApi();
 builder.Services.AddGracefulShutdown();
 builder.Services.AddTradeSimulatorTelemetry(builder.Configuration, PortfolioTelemetry.Service);
@@ -29,7 +28,6 @@ builder.Services.AddHealthChecks()
     {
         await using var connection = await sp.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync(ct);
     })
-    .AddProbe("redis", async (sp, _) => await sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase().PingAsync())
     .AddRabbitMqProbe();
 builder.Services.AddSingleton<IPortfolioMetrics, PortfolioMetrics>();
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -46,15 +44,9 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:4200").AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString ?? string.Empty));
-builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-    ConnectionMultiplexer.Connect(new ConfigurationOptions
-    {
-        EndPoints = { redisConnection ?? "localhost:6379" },
-        AbortOnConnectFail = false
-    }));
 builder.Services.AddSingleton<PostgresAssetStore>();
 builder.Services.AddSingleton<IAssetStore>(sp => sp.GetRequiredService<PostgresAssetStore>());
-builder.Services.AddSingleton<IOutboxStore<PendingResponse>>(sp => sp.GetRequiredService<PostgresAssetStore>());
+builder.Services.AddSingleton<IOutboxStore<PendingEvent>>(sp => sp.GetRequiredService<PostgresAssetStore>());
 builder.Services.AddOutboxBacklogMonitor<PostgresAssetStore>();
 MongoSetup.Initialize();
 builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(
@@ -68,19 +60,15 @@ builder.Services.AddSingleton<AssetProjectionHandler>();
 builder.Services.AddHostedService<AssetProjectionConsumer>();
 builder.Services.AddSingleton<ISearchAssets, SearchAssetsHandler>();
 builder.Services.AddSingleton<IGetAsset, GetAssetHandler>();
-builder.Services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
-builder.Services.AddSingleton<RabbitMqResponsePublisher>();
-builder.Services.AddSingleton<IResponsePublisher>(sp => sp.GetRequiredService<RabbitMqResponsePublisher>());
-builder.Services.AddSingleton<IOutboxPublisher<PendingResponse>>(sp => sp.GetRequiredService<RabbitMqResponsePublisher>());
+builder.Services.AddSingleton<IOutboxPublisher<PendingEvent>, RabbitMqEventPublisher>();
 builder.Services.AddSingleton<IAssetNotifier, SignalRAssetNotifier>();
-builder.Services.AddSingleton<PortfolioCommandProcessor>();
-builder.Services.AddSingleton<PortfolioCommandMessageHandler>();
-builder.Services.AddSingleton<OrderEventMessageHandler>();
-builder.Services.AddSingleton<ExchangeEventMessageHandler>();
-builder.Services.AddOutboxPublisher<PendingResponse>("portfolio responses", TimeSpan.FromMilliseconds(200));
-builder.Services.AddHostedService<PortfolioCommandConsumer>();
+builder.Services.AddSingleton<IDepositAsset, DepositAssetHandler>();
+builder.Services.AddSingleton<IReserveAssets, ReserveAssetsHandler>();
+builder.Services.AddSingleton<ISettleReservation, SettleReservationHandler>();
+builder.Services.AddSingleton<IReleaseReservation, ReleaseReservationHandler>();
+builder.Services.AddSingleton<OrderEventHandler>();
 builder.Services.AddHostedService<OrderEventConsumer>();
-builder.Services.AddHostedService<ExchangeEventConsumer>();
+builder.Services.AddOutboxPublisher<PendingEvent>("portfolio events", TimeSpan.FromMilliseconds(200));
 
 var app = builder.Build();
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -128,7 +116,8 @@ if (app.Environment.IsDevelopment())
 app.MapTradeSimulatorHealth();
 app.MapSearchAssetsEndpoint();
 app.MapGetAssetEndpoint();
-app.MapOrderReservationEndpoints();
+app.MapDepositAssetEndpoint();
+app.MapReserveAssetsEndpoint();
 app.MapHub<PortfolioHub>(PortfolioHub.Route);
 app.Run();
 

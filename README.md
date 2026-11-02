@@ -12,7 +12,7 @@ Cada módulo é um microsserviço .NET 10 independente, com seu próprio projeto
 | --- | --- | --- |
 | **Account** | 8080 | Conta corrente: abertura, depósitos, saques, reserva (provisionamento) de saldo para ordens de compra e débito/liberação conforme as execuções. |
 | **Orders** | 8081 | Ciclo de vida das ordens (envio, cancelamento, substituição, execução parcial e total) e seu histórico. |
-| **Portfolio** | 8082 | Carteira de ativos por conta: posição disponível e bloqueada (ordens de venda). Usa Redis para idempotência e MongoDB para o read model. |
+| **Portfolio** | 8082 | Carteira de ativos por conta: posição disponível e bloqueada (ordens de venda). Usa MongoDB para o read model. Depósitos e reservas são HTTP (`POST /api/assets/deposits`, `/api/assets/reservations`). |
 | **Exchange** | 8083 | A bolsa. Livro de ofertas com casamento de ordens, cadastro de instrumentos, histórico de cotações e simulação de pregão. Serviço externo: **não conhece nenhum outro módulo**. |
 | **Quotes** | 8084 | Cotações em tempo real, via SignalR. |
 | **OfferBook** | 8085 | Livro de ofertas em tempo real, via SignalR. |
@@ -23,23 +23,23 @@ Cada módulo é um microsserviço .NET 10 independente, com seu próprio projeto
 ## Como funciona
 
 1. O usuário abre uma conta e deposita fundos (**Account**).
-2. Ao enviar uma ordem, **Orders** a registra como pendente e publica um comando de reserva: de **fundos** em Account (compra) ou de **ativos** em Portfolio (venda).
-3. Account/Portfolio respondem com sucesso ou falha. Em caso de falha a ordem é rejeitada; em caso de sucesso, Orders a despacha para a **Exchange**.
+2. Ao enviar uma ordem, **Orders** a registra como pendente e a valida de forma síncrona (HTTP): reserva de **fundos** em Account (compra, com o valor calculado por Orders) ou de **ativos** em Portfolio (venda).
+3. Account/Portfolio respondem com sucesso ou falha na própria chamada. Em caso de falha a ordem é rejeitada; em caso de sucesso, Orders a despacha para a **Exchange**.
 4. A **Exchange** casa as ordens no livro e publica eventos (aceita, parcialmente executada, executada, cancelada, substituída, rejeitada). Rejeições trazem o motivo (`reason`, ex.: `NoQuote`, `InvalidOrder`), exibido no histórico da ordem.
    - **Agendamento (módulo Orders):** com o mercado fechado (não ocorre: a bolsa opera 24/7), após a reserva de fundos/ativos a ordem vai para **ScheduledDispatching** (*Agendada*) e **não é enviada à Exchange**, que desconhece o conceito. Os bloqueios permanecem; ao abrir a sessão o Orders a despacha (→ `PendingNew`, fluxo normal). Cancelar uma ordem agendada é local (`OrderScheduleCancelled`) e libera os bloqueios em Account/Portfolio. As ordens ficam persistidas no event store do Orders (sobrevivem a reinícios).
-5. **Orders** aplica os eventos ao estado da ordem; **Account** debita/libera saldo e **Portfolio** movimenta ativos a partir desses mesmos eventos.
+5. **Orders** aplica os eventos ao estado da ordem; **Orders** publica os eventos da ordem (`OrderPartiallyFilled`, `OrderFilled`, `OrderCancelled`, `OrderRejected`, `OrderScheduleCancelled`); **Account** e **Portfolio** os consomem para debitar/liquidar a reserva (idempotente pelo id do envelope) e liberar o que sobrar.
 6. A Exchange publica cotações e livro de ofertas só para tickers com interesse registrado; **Quotes** e **OfferBook** renovam periodicamente esse interesse (heartbeat) enquanto houver clientes conectados e retransmitem as atualizações por SignalR para a UI.
 
-A comunicação entre serviços é assíncrona, por RabbitMQ.
+Validação de ordens e reservas de saldo são síncronas (HTTP); eventos da Exchange e demais notificações trafegam por RabbitMQ.
 
 ## Validação síncrona de ordens
 
 `POST /api/orders` valida e reserva antes de responder. Orders grava a ordem e chama por HTTP:
 
-- **Compra** → Account `POST /api/order-reservations`. Um *gate* em Redis (script Lua, single-threaded e atômico) confere e reserva o saldo; o Postgres continua sendo a fonte de verdade.
-- **Venda** → Portfolio `POST /api/order-reservations`. A posição é bloqueada com lock otimista (versão do stream do ativo + retry em conflito).
+- **Compra** → Account `POST /api/accounts/{id}/reservations` `{reservationId, amount}` (Account desconhece ordens; Orders calcula o valor, consultando o OfferBook nas ordens a mercado). O saldo é conferido e reservado numa única transação Postgres, serializada por conta com `pg_advisory_xact_lock`.
+- **Venda** → Portfolio `POST /api/assets/reservations` (`reservationId` = id da ordem). A posição é bloqueada sob lock consultivo do Postgres, reaplicando os eventos do ativo.
 
-Sem saldo/posição a resposta é `422` com `reason` e a ordem fica `Rejected`; serviço indisponível retorna `503`. Se o despacho falhar, a reserva é liberada (`DELETE /api/order-reservations/{orderId}`). A reserva é idempotente por `orderId`.
+Sem saldo/posição a resposta é `422` com `reason` e a ordem fica `Rejected`; serviço indisponível retorna `503`. Se o despacho falhar, `OrderRejected` é publicado e Account/Portfolio liberam a reserva. A reserva é idempotente por `reservationId`.
 
 ## Padrões e técnicas
 
@@ -49,9 +49,9 @@ As regras completas estão em [`PATTERNS.md`](PATTERNS.md) (e as de interface em
 - **Ports & Adapters (Hexagonal)** estrito: o domínio e os handlers não conhecem ASP.NET, Npgsql, RabbitMQ, SignalR nem JSON. Adaptadores de entrada (endpoints HTTP, consumidores de mensagens) chamam portas de entrada; adaptadores de saída em `Infrastructure/` implementam as portas de saída.
 - **Vertical Slices**: cada caso de uso (comando ou consulta) vive em `Features/<CasoDeUso>/`, com tudo de que precisa (o lado API). As reações a mensagens de outros módulos ficam em `Processors/<CasoDeUso>/` (o lado worker), também uma pasta por caso de uso. Portas e tipos usados pelos dois lados ficam em `Common/`.
 - **Domain-Driven Design**: agregados como fronteira transacional, objetos de valor com ids fortemente tipados e criação validada (`TryCreate`), eventos de domínio.
-- **Event Sourcing** (Account, Orders, Portfolio): o estado é reconstruído a partir dos eventos, com snapshots; **CQRS** com read models em **MongoDB**, alimentados por *handlers* acionados pelos eventos do outbox (sem polling do stream) (as event stores não têm métodos de read model; ver `PATTERNS.md`).
+- **Event Sourcing** (Account, Orders, Portfolio): o estado é reconstruído a partir dos eventos (sem snapshots: sempre reaplicando os eventos); **CQRS** com read models em **MongoDB**, alimentados por *handlers* acionados pelos eventos do outbox (sem polling do stream) (as event stores não têm métodos de read model; ver `PATTERNS.md`).
 - **Transactional Outbox**: eventos e respostas são gravados na mesma transação do estado e publicados por um serviço em segundo plano, garantindo entrega *at-least-once*.
-- **Idempotência e concorrência otimista**: repetição de mensagens é tolerada (chave no Redis no Portfolio) e conflitos de versão são reprocessados.
+- **Idempotência e concorrência otimista**: repetição de mensagens e de chamadas é tolerada (chaves de idempotência no Postgres) e conflitos de versão são reprocessados.
 - **Railway-oriented programming**: erros esperados são valores (`Result<T, TError>`, biblioteca Moonad), não exceções; cada módulo tem seu catálogo de erros e o mapeamento para HTTP fica na infraestrutura.
 - **Mensageria** com envelope padrão (`EventEnvelope<T>`) e correlation id propagado do HTTP até os eventos.
 - **Tempo real** com SignalR e registro de interesse sob demanda, para a bolsa publicar apenas o que alguém está acompanhando.
@@ -86,7 +86,7 @@ Na raiz do repositório:
 docker compose up --build
 ```
 
-Isso inicia PostgreSQL, MongoDB, Redis, RabbitMQ, os seis serviços e a UI. O usuário (`tradesimulator`) e os schemas do PostgreSQL são criados por `database/init-schemas.sql` e as tabelas são criadas pelos próprios serviços na inicialização.
+Isso inicia PostgreSQL, MongoDB, RabbitMQ, os seis serviços e a UI. O usuário (`tradesimulator`) e os schemas do PostgreSQL são criados por `database/init-schemas.sql` e as tabelas são criadas pelos próprios serviços na inicialização.
 
 | Serviço | URL |
 | --- | --- |

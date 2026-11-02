@@ -10,11 +10,6 @@ export const routes: Routes = [
     loadComponent: () => import('./account/account-page').then((m) => m.AccountPage),
   },
   {
-    path: 'account/stream',
-    title: `Stream da Conta${suffix}`,
-    loadComponent: () => import('./account/account-stream-page').then((m) => m.AccountStreamPage),
-  },
-  {
     path: 'orders',
     title: `Ordens${suffix}`,
     loadComponent: () => import('./orders/orders-page').then((m) => m.OrdersPage),

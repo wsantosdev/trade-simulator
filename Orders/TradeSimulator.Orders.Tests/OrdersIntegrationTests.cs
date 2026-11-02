@@ -112,7 +112,6 @@ public sealed class OrdersIntegrationTests(InfrastructureFixture infrastructure)
             return Task.FromResult(Outcome);
         }
 
-        public Task ReleaseAsync(Order order, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private Task<HttpResponseMessage> Post(Guid accountId) =>

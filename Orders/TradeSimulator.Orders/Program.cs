@@ -88,6 +88,11 @@ foreach (var (service, fallback) in new[] { (HttpReservationGateway.Account, "ht
         client.Timeout = TimeSpan.FromSeconds(10);
     });
 }
+builder.Services.AddHttpClient<IOfferBookClient, HttpOfferBookClient>(client =>
+{
+    client.BaseAddress = new Uri((builder.Configuration["OfferBook:BaseUrl"] ?? "http://localhost:8081").TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
 builder.Services.AddSingleton<IReservationGateway, HttpReservationGateway>();
 
 var app = builder.Build();

@@ -10,70 +10,108 @@ namespace TradeSimulator.Orders.Infrastructure.Reservations;
 // Calls Account (buy) or Portfolio (sell) synchronously. A 422 is a business rejection; anything else is unavailability.
 public sealed class HttpReservationGateway(
     IHttpClientFactory factory,
+    IOfferBookClient offerBook,
     ILogger<HttpReservationGateway> logger) : IReservationGateway
 {
     public const string Account = "Account";
     public const string Portfolio = "Portfolio";
+    private const decimal MarketMargin = 1.05m;
 
-    public async Task<ReservationOutcome> ReserveAsync(Order order, CancellationToken cancellationToken)
+    public Task<ReservationOutcome> ReserveAsync(Order order, CancellationToken cancellationToken) =>
+        order.Side == OrderSide.Buy ? ReserveFundsAsync(order, cancellationToken) : ReservePositionAsync(order, cancellationToken);
+
+    private async Task<ReservationOutcome> ReserveFundsAsync(Order order, CancellationToken cancellationToken)
     {
-        var service = order.Side == OrderSide.Buy ? Account : Portfolio;
-        object body = order.Side == OrderSide.Buy
-            ? new
-            {
-                orderId = order.Id.Guid,
-                accountId = order.AccountId.Guid,
-                ticker = order.Ticker.Value,
-                side = order.Side.ToString(),
-                type = order.Type.ToString(),
-                quantity = order.Quantity,
-                price = order.Price
-            }
-            : new
-            {
-                orderId = order.Id.Guid,
-                accountId = order.AccountId.Guid,
-                ticker = order.Ticker.Value,
-                quantity = order.Quantity
-            };
+        decimal reference;
+        if (order.Type == OrderType.Limit)
+            reference = order.Price ?? 0m;
+        else
+        {
+            var bestAsk = await offerBook.GetBestAskAsync(order.Ticker.Value, cancellationToken);
+            if (bestAsk is null)
+                return ReservationOutcome.Rejected("PriceUnavailable");
+            reference = bestAsk.Value;
+        }
+
+        decimal amount;
+        try
+        {
+            var factor = order.Type == OrderType.Market ? MarketMargin : 1m;
+            amount = Math.Ceiling(checked(order.Quantity * reference * factor) * 100m) / 100m;
+        }
+        catch (OverflowException)
+        {
+            return ReservationOutcome.Rejected("InvalidOrder");
+        }
+
+        if (amount <= 0)
+            return ReservationOutcome.Rejected("InvalidOrder");
 
         try
         {
-            using var response = await factory.CreateClient(service)
-                .PostAsJsonAsync("api/order-reservations", body, cancellationToken);
+            using var response = await factory.CreateClient(Account).PostAsJsonAsync(
+                $"api/accounts/{order.AccountId.Guid:D}/reservations",
+                new { reservationId = order.Id.Guid, amount },
+                cancellationToken);
             if (response.IsSuccessStatusCode)
                 return ReservationOutcome.Ok();
 
-            if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            switch (response.StatusCode)
             {
-                var content = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-                var reason = content.TryGetProperty("reason", out var value) ? value.GetString() : null;
-                return ReservationOutcome.Rejected(reason);
+                case HttpStatusCode.NotFound:
+                    return ReservationOutcome.Rejected("AccountNotFound");
+                case HttpStatusCode.UnprocessableEntity:
+                    return ReservationOutcome.Rejected("InsufficientFunds");
+                case HttpStatusCode.BadRequest or HttpStatusCode.Conflict:
+                    return ReservationOutcome.Rejected("InvalidOrder");
             }
 
-            logger.LogWarning("{Service} answered {Status} for order {OrderId}.", service, (int)response.StatusCode, order.Id);
-            return ReservationOutcome.ServiceUnavailable(service);
-        }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
-        {
-            logger.LogWarning(exception, "{Service} is unavailable for order {OrderId}.", service, order.Id);
-            return ReservationOutcome.ServiceUnavailable(service);
-        }
-    }
-
-    public async Task ReleaseAsync(Order order, CancellationToken cancellationToken)
-    {
-        var service = order.Side == OrderSide.Buy ? Account : Portfolio;
-        try
-        {
-            using var response = await factory.CreateClient(service)
-                .DeleteAsync($"api/order-reservations/{order.Id.Guid:D}", cancellationToken);
-            if (!response.IsSuccessStatusCode)
-                logger.LogWarning("{Service} could not release the reservation of order {OrderId}: {Status}.", service, order.Id, (int)response.StatusCode);
+            logger.LogWarning("Account answered {Status} for order {OrderId}.", (int)response.StatusCode, order.Id);
+            return ReservationOutcome.ServiceUnavailable(Account);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
         {
-            logger.LogWarning(exception, "Could not release the reservation of order {OrderId} on {Service}.", order.Id, service);
+            logger.LogWarning(exception, "Account is unavailable for order {OrderId}.", order.Id);
+            return ReservationOutcome.ServiceUnavailable(Account);
+        }
+    }
+
+    private async Task<ReservationOutcome> ReservePositionAsync(Order order, CancellationToken cancellationToken)
+    {
+        var body = new
+        {
+            reservationId = order.Id.Guid,
+            accountId = order.AccountId.Guid,
+            ticker = order.Ticker.Value,
+            quantity = order.Quantity
+        };
+
+        try
+        {
+            using var response = await factory.CreateClient(Portfolio)
+                .PostAsJsonAsync("api/assets/reservations", body, cancellationToken);
+            if (response.IsSuccessStatusCode)
+                return ReservationOutcome.Ok();
+
+            switch (response.StatusCode)
+            {
+                case HttpStatusCode.UnprocessableEntity:
+                    var content = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+                    var reason = content.TryGetProperty("reason", out var value) ? value.GetString() : null;
+                    return ReservationOutcome.Rejected(reason);
+                case HttpStatusCode.NotFound:
+                    return ReservationOutcome.Rejected("AssetNotFound");
+                case HttpStatusCode.BadRequest or HttpStatusCode.Conflict:
+                    return ReservationOutcome.Rejected("InvalidOrder");
+            }
+
+            logger.LogWarning("Portfolio answered {Status} for order {OrderId}.", (int)response.StatusCode, order.Id);
+            return ReservationOutcome.ServiceUnavailable(Portfolio);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(exception, "Portfolio is unavailable for order {OrderId}.", order.Id);
+            return ReservationOutcome.ServiceUnavailable(Portfolio);
         }
     }
 }

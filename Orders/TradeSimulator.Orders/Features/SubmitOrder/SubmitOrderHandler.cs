@@ -34,8 +34,15 @@ public sealed class SubmitOrderHandler(
 {
     public async Task<Result<Order, IOrderError>> ExecuteAsync(SubmitOrderCommand command, CancellationToken cancellationToken)
     {
+        var hash = RequestHash.TryCreate(command.RequestHash);
+        if (hash.IsError)
+        {
+            metrics.OperationCompleted("submit", hash.ErrorValue);
+            return Result<Order, IOrderError>.Error(hash.ErrorValue);
+        }
+
         var order = Order.Send(
-            OrderId.New(),
+            OrderId.For(hash.ResultValue),
             command.AccountId,
             command.Ticker,
             command.Side,
@@ -50,13 +57,16 @@ public sealed class SubmitOrderHandler(
             return order;
         }
 
-        var stored = await store.SendAsync(order.ResultValue, cancellationToken);
+        var stored = await store.AppendAsync(order.ResultValue, cancellationToken);
+        // The same request already created this order: return the original untouched.
+        if (stored.IsError && stored.ErrorValue is ConcurrencyConflict)
+        {
+            metrics.OperationCompleted("submit", null);
+            return await store.GetAsync(order.ResultValue.Id, cancellationToken);
+        }
+
         metrics.OperationCompleted("submit", stored.IsError ? stored.ErrorValue : null);
         if (stored.IsError)
-            return stored;
-
-        // A repeated request returns the original order untouched.
-        if (stored.ResultValue.Id != order.ResultValue.Id)
             return stored;
 
         metrics.OrderSubmitted(command.Side.ToString(), command.Type.ToString());
@@ -81,7 +91,6 @@ public sealed class SubmitOrderHandler(
         }
         catch
         {
-            await reservations.ReleaseAsync(stored.ResultValue, CancellationToken.None);
             await transitions.RejectSubmissionAsync(stored.ResultValue.Id, "DispatchFailed", CancellationToken.None);
             throw;
         }

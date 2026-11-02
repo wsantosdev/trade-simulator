@@ -39,83 +39,42 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
         return true;
     }
 
-    public async Task<Result<Order, IOrderError>> SendAsync(Order order, CancellationToken cancellationToken)
-    {
-        if (order.UncommittedEvents.Count != 1 || order.UncommittedEvents[0] is not OrderSubmitted sent)
-            return new UnsupportedOrderEvent();
-
-        try
-        {
-            return await InsertAsync(order, cancellationToken);
-        }
-        catch (PostgresException exception) when (
-            exception.SqlState == PostgresErrorCodes.UniqueViolation &&
-            exception.ConstraintName == "order_requests_pkey")
-        {
-            logger.LogInformation("Duplicate order submission detected; returning the original order.");
-            return await GetByRequestHashAsync(sent.RequestHash, cancellationToken);
-        }
-        catch (PostgresException exception) when (
-            exception.SqlState == PostgresErrorCodes.UniqueViolation &&
-            exception.ConstraintName is "ux_events_single_submitted" or "ux_events_stream_version")
-        {
-            return new OrderAlreadyExists();
-        }
-    }
-
+    // The first event of a stream is the submission; a version collision means someone else wrote first.
     public async Task<Result<Order, IOrderError>> AppendAsync(Order order, CancellationToken cancellationToken)
-    {
-        if (order.UncommittedEvents.Count == 0 || order.UncommittedEvents.Any(e => e is OrderSubmitted))
-            return new UnsupportedOrderEvent();
-
-        try
-        {
-            return await InsertAsync(order, cancellationToken);
-        }
-        catch (PostgresException exception) when (
-            exception.SqlState == PostgresErrorCodes.UniqueViolation &&
-            exception.ConstraintName == "ux_events_stream_version")
-        {
-            return new ConcurrencyConflict();
-        }
-    }
-
-    private async Task<Result<Order, IOrderError>> InsertAsync(Order order, CancellationToken cancellationToken)
     {
         const string outboxSql = """
             INSERT INTO event_outbox (position, event_type, payload, traceparent)
             VALUES (@position, @eventType, @envelope, @traceParent);
             """;
 
-        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        var firstVersion = order.Version - order.UncommittedEvents.Count + 1;
-        if (order.UncommittedEvents.OfType<OrderSubmitted>().SingleOrDefault() is { } submitted)
+        try
         {
-            await using var request = new NpgsqlCommand(
-                "INSERT INTO order_requests (request_hash, stream_id) VALUES (@hash, @stream);", connection, transaction);
-            request.Parameters.AddWithValue("hash", NpgsqlDbType.Char, submitted.RequestHash.Value);
-            request.Parameters.AddWithValue("stream", submitted.StreamId);
-            await request.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        var appended = await Events.AppendAsync(connection, transaction, order.UncommittedEvents, firstVersion, cancellationToken);
-        foreach (var entry in appended)
-        {
-            await using var command = new NpgsqlCommand(outboxSql, connection, transaction);
-            command.Parameters.AddWithValue("position", entry.Id);
-            command.Parameters.AddWithValue("eventType", entry.Type);
-            command.Parameters.Add(new NpgsqlParameter("envelope", NpgsqlDbType.Jsonb)
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            var firstVersion = order.Version - order.UncommittedEvents.Count + 1;
+            var appended = await Events.AppendAsync(connection, transaction, order.UncommittedEvents, firstVersion, cancellationToken);
+            foreach (var entry in appended)
             {
-                Value = OrderEventSerializer.SerializeEnvelope((OrderEvent)entry.Event)
-            });
-            command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
+                await using var command = new NpgsqlCommand(outboxSql, connection, transaction);
+                command.Parameters.AddWithValue("position", entry.Id);
+                command.Parameters.AddWithValue("eventType", entry.Type);
+                command.Parameters.Add(new NpgsqlParameter("envelope", NpgsqlDbType.Jsonb)
+                {
+                    Value = OrderEventSerializer.SerializeEnvelope((OrderEvent)entry.Event)
+                });
+                command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
 
-        await transaction.CommitAsync(cancellationToken);
-        order.CommitEvents();
-        return order;
+            await transaction.CommitAsync(cancellationToken);
+            order.CommitEvents();
+            return order;
+        }
+        catch (PostgresException exception) when (
+            exception.SqlState == PostgresErrorCodes.UniqueViolation && exception.ConstraintName == "ux_events_stream_version")
+        {
+            return new ConcurrencyConflict();
+        }
     }
 
     public async Task<IReadOnlyList<StoredOrderEvent>> ReadEventsAsync(OrderId id, CancellationToken cancellationToken)
@@ -183,16 +142,6 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private async Task<Result<Order, IOrderError>> GetByRequestHashAsync(RequestHash hash, CancellationToken cancellationToken)
-    {
-        const string sql = "SELECT stream_id FROM order_requests WHERE request_hash = @requestHash;";
-        await using var command = dataSource.CreateCommand(sql);
-        command.Parameters.AddWithValue("requestHash", NpgsqlDbType.Char, hash.Value);
-        return await command.ExecuteScalarAsync(cancellationToken) is Guid orderId
-            ? await ReadOrderAsync(orderId, cancellationToken)
-            : new OrderNotFound();
-    }
-
     private async Task<Result<Order, IOrderError>> ReadOrderAsync(Guid orderId, CancellationToken cancellationToken)
     {
         IReadOnlyList<StoredEvent> stored;
@@ -208,7 +157,6 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
 
         if (stored.Count == 0)
             return new OrderNotFound();
-        var legacyOpening = stored.Any(entry => entry.Type == OrderEventSerializer.LegacyOpeningType);
-        return Order.Rehydrate(stored.Select(entry => (OrderEvent)entry.Event).ToList(), legacyOpening);
+        return Order.Rehydrate(stored.Select(entry => (OrderEvent)entry.Event).ToList());
     }
 }

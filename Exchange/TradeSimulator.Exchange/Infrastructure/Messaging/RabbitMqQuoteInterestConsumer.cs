@@ -1,7 +1,7 @@
-using System.Text;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
+using TradeSimulator.Commons.Messaging;
+using TradeSimulator.Commons.Telemetry;
 using TradeSimulator.Exchange.Infrastructure.Serialization;
+using TradeSimulator.Exchange.Infrastructure.Telemetry;
 using TradeSimulator.Exchange.Processors.Quotes;
 
 namespace TradeSimulator.Exchange.Infrastructure.Messaging;
@@ -9,65 +9,26 @@ namespace TradeSimulator.Exchange.Infrastructure.Messaging;
 public sealed class RabbitMqQuoteInterestConsumer(
     IConfiguration configuration,
     QuoteInterestRegistry registry,
-    ILogger<RabbitMqQuoteInterestConsumer> logger) : BackgroundService
+    ILogger<RabbitMqQuoteInterestConsumer> logger) : RabbitMqConsumer(configuration, logger)
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    private readonly ILogger _logger = logger;
+
+    protected override ServiceTelemetry Telemetry => ExchangeTelemetry.Service;
+    protected override string ExchangeName => QuoteTopology.InterestExchange;
+    protected override string QueueName => QuoteTopology.InterestQueue;
+    protected override IReadOnlyList<string> RoutingKeys => ["#"];
+    // Interest is a heartbeat: a lost message is replaced by the next one.
+    protected override bool AutoAck => true;
+    protected override IDictionary<string, object?> QueueArguments =>
+        new Dictionary<string, object?> { ["x-message-ttl"] = QuoteTopology.InterestMessageTtlMilliseconds };
+
+    protected override Task HandleAsync(string body, CancellationToken cancellationToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await ConsumeAsync(stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Quote interest consumer failed; reconnecting.");
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-            }
-        }
-    }
-
-    private async Task ConsumeAsync(CancellationToken stoppingToken)
-    {
-        var factory = new ConnectionFactory
-        {
-            Uri = new Uri(configuration["RabbitMq:Uri"] ?? "amqp://localhost:5672/")
-        };
-        await using var connection = await factory.CreateConnectionAsync(stoppingToken);
-        await using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
-        await channel.ExchangeDeclareAsync(
-            QuoteTopology.InterestExchange, ExchangeType.Topic, durable: true, cancellationToken: stoppingToken);
-        await channel.QueueDeclareAsync(
-            QuoteTopology.InterestQueue, durable: true, exclusive: false, autoDelete: false,
-            arguments: new Dictionary<string, object?> { ["x-message-ttl"] = QuoteTopology.InterestMessageTtlMilliseconds },
-            cancellationToken: stoppingToken);
-        await channel.QueueBindAsync(QuoteTopology.InterestQueue, QuoteTopology.InterestExchange, "#", cancellationToken: stoppingToken);
-
-        var shutdown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        connection.ConnectionShutdownAsync += (_, _) =>
-        {
-            shutdown.TrySetResult();
-            return Task.CompletedTask;
-        };
-
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += (_, delivery) =>
-        {
-            var tickers = QuoteInterestParser.Parse(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options);
-            if (tickers.IsError)
-                logger.LogWarning("Dropped a malformed quote interest message.");
-            else
-                registry.Renew(tickers.ResultValue);
-            return Task.CompletedTask;
-        };
-        // Interest is a heartbeat: a lost message is replaced by the next one, so no acknowledgement is needed.
-        await channel.BasicConsumeAsync(QuoteTopology.InterestQueue, autoAck: true, consumer, stoppingToken);
-        logger.LogInformation("Consuming quote interest from {Queue}.", QuoteTopology.InterestQueue);
-
-        await Task.WhenAny(shutdown.Task, Task.Delay(Timeout.Infinite, stoppingToken));
+        var tickers = QuoteInterestParser.Parse(body, MessageJson.Options);
+        if (tickers.IsError)
+            _logger.LogWarning("Dropped a malformed quote interest message.");
+        else
+            registry.Renew(tickers.ResultValue);
+        return Task.CompletedTask;
     }
 }

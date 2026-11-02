@@ -15,23 +15,14 @@ public static class AccountErrorHttpResults
             WithdrawalExceedsAvailableBalance => (StatusCodes.Status422UnprocessableEntity, "Insufficient available balance", "A withdrawal cannot exceed the available balance."),
             InvalidReservationAmount => (StatusCodes.Status422UnprocessableEntity, "Invalid reservation", "A reservation must be greater than zero."),
             ReservationExceedsAvailableBalance => (StatusCodes.Status422UnprocessableEntity, "Insufficient available balance", "A reservation cannot exceed the available balance."),
-            InvalidOrderId => (StatusCodes.Status400BadRequest, "Invalid order identifier", "Order identifiers must be non-empty UUID version 7 values."),
+            InvalidReservationId => (StatusCodes.Status400BadRequest, "Invalid reservation identifier", "Reservation identifiers must be non-empty UUID version 7 values."),
+            ReservationNotFound => (StatusCodes.Status404NotFound, "Reservation not found", "The requested reservation does not exist."),
             InvalidReleaseAmount => (StatusCodes.Status422UnprocessableEntity, "Invalid release", "A release must be greater than zero."),
             ReleaseExceedsProvisionedBalance => (StatusCodes.Status422UnprocessableEntity, "Insufficient provisioned balance", "A release cannot exceed the provisioned balance."),
             InvalidDebitAmount => (StatusCodes.Status422UnprocessableEntity, "Invalid debit", "A debit must be greater than zero."),
             DebitExceedsProvisionedBalance => (StatusCodes.Status422UnprocessableEntity, "Insufficient provisioned balance", "A debit cannot exceed the provisioned balance."),
-            PriceUnavailable => (StatusCodes.Status422UnprocessableEntity, "Price unavailable", "The market price could not be determined."),
-            AccountBalanceLimitExceeded => (StatusCodes.Status422UnprocessableEntity, "Account balance limit exceeded", "The operation would exceed the maximum account balance."),
-            InvalidStreamPosition => (StatusCodes.Status422UnprocessableEntity, "Invalid stream position", "The position must be between 2 and the next version of the stream."),
-            UnsupportedStreamEvent => (StatusCodes.Status400BadRequest, "Unsupported event", "Only 'deposit' and 'withdrawal' events can be inserted."),
-            StreamReplayRejected rejected => (StatusCodes.Status422UnprocessableEntity, "Replay rejected",
-                $"The stream would become invalid: event v{rejected.Version} ({rejected.EventType}) cannot be applied. Nothing was changed."),
             AccountNotFound => (StatusCodes.Status404NotFound, "Account not found", "The requested account does not exist."),
-            AccountAlreadyExists or AccountAlreadyOpened => (StatusCodes.Status409Conflict, "Account conflict", "The account already exists or has already been opened."),
-            SnapshotAccountMismatch or InvalidSnapshotBalance or AccountOpeningEventMissing or EventAccountMismatch or
-                InvalidPersistedDeposit or InvalidPersistedWithdrawal or InvalidPersistedReservation or InvalidPersistedRelease or InvalidPersistedDebit or UnsupportedAccountEvent or
-                NegativeAccountBalance or CorruptAccountHistory or AccountPersistenceFailure =>
-                (StatusCodes.Status500InternalServerError, "Account state error", "The account state could not be processed."),
+            AccountAlreadyExists => (StatusCodes.Status409Conflict, "Account conflict", "The account already exists or has already been opened."),
             _ => (StatusCodes.Status500InternalServerError, "Unexpected account error", "The request could not be processed.")
         };
 

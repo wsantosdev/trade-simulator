@@ -12,6 +12,7 @@ public static class PortfolioErrorHttpResults
             InvalidAccountId => (StatusCodes.Status400BadRequest, "Invalid account identifier", "Account identifiers must be non-empty UUID version 7 values."),
             InvalidTicker => (StatusCodes.Status400BadRequest, "Invalid ticker", "A ticker must have four letters followed by the digit 3, 4 or 5 (for example PETR4)."),
             InvalidSortField => (StatusCodes.Status400BadRequest, "Invalid sort field", "The sort field must be ticker, total, available or blocked."),
+            InvalidQuantity or QuantityAboveLimit or QuantityOverflow => (StatusCodes.Status400BadRequest, "Invalid quantity", "The quantity must be positive and the total must stay within the limit."),
             AssetNotFound => (StatusCodes.Status404NotFound, "Asset not found", "The account does not hold this asset."),
             _ => (StatusCodes.Status500InternalServerError, "Portfolio error", "The request could not be processed.")
         };

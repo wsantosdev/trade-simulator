@@ -34,9 +34,9 @@ public sealed class RabbitMqCommandPublisher(IConfiguration configuration) : IOu
                 await _channel.ExchangeDeclareAsync(EventsExchangeName, ExchangeType.Topic, durable: true, cancellationToken: cancellationToken);
                 // Bound before the first event so none is dropped while the projection consumer is still starting.
                 await _channel.QueueDeclareAsync(
-                    RabbitMqOrderProjectionConsumer.QueueName, durable: true, exclusive: false, autoDelete: false, cancellationToken: cancellationToken);
+                    RabbitMqOrderProjectionConsumer.Queue, durable: true, exclusive: false, autoDelete: false, cancellationToken: cancellationToken);
                 await _channel.QueueBindAsync(
-                    RabbitMqOrderProjectionConsumer.QueueName, EventsExchangeName, "#", cancellationToken: cancellationToken);
+                    RabbitMqOrderProjectionConsumer.Queue, EventsExchangeName, "#", cancellationToken: cancellationToken);
             }
 
             var properties = new BasicProperties { ContentType = "application/json", DeliveryMode = DeliveryModes.Persistent };

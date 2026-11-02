@@ -3,6 +3,8 @@ using Moonad;
 using TradeSimulator.Orders.Common;
 using TradeSimulator.Orders.Domain;
 using TradeSimulator.Orders.Domain.Entities;
+using TradeSimulator.Orders.Domain.Enums;
+using TradeSimulator.Orders.Processors;
 
 namespace TradeSimulator.Orders.Features.CancelOrder;
 

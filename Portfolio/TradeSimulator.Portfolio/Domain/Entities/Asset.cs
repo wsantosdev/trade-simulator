@@ -26,9 +26,13 @@ public sealed class Asset : EventSourcedEntity
     public Quantity Available { get; private set; }
     public Quantity Blocked { get; private set; }
 
+    private readonly Dictionary<Guid, long> _remaining = [];
+    private readonly Dictionary<Guid, long> _reserved = [];
+    private readonly HashSet<Guid> _settlements = [];
+
     public Quantity Total => Available.Add(Blocked);
 
-    public bool IsRemoved => Total.IsZero;
+    public bool IsEmpty => Total.IsZero;
 
     public static Result<Asset, IPortfolioError> Open(
         AssetId id, AccountId accountId, Ticker ticker, Quantity quantity, DateTimeOffset now)
@@ -44,48 +48,14 @@ public sealed class Asset : EventSourcedEntity
 
     public static Result<Asset, IPortfolioError> Rehydrate(IReadOnlyList<AssetEvent> history)
     {
-        if (history.Count == 0 || history[0] is not AssetDeposited opened)
-            return new AssetOpeningEventMissing();
-
-        var asset = new Asset(opened);
+        var asset = new Asset((AssetDeposited)history[0]);
         foreach (var @event in history)
-        {
-            if (@event.AssetId != asset.Id)
-                return new CorruptAssetHistory();
             asset.ReplayEvent(@event);
-        }
-
         return asset;
     }
-
-    public static Result<Asset, IPortfolioError> Restore(AssetSnapshot snapshot, IReadOnlyList<AssetEvent> later)
-    {
-        if (snapshot.Available < 0 || snapshot.Blocked < 0 || snapshot.Version <= 0)
-            return new CorruptAssetHistory();
-
-        var asset = new Asset(snapshot.AssetId, snapshot.AccountId, snapshot.Ticker)
-        {
-            Available = Quantity.Restore(snapshot.Available),
-            Blocked = Quantity.Restore(snapshot.Blocked),
-            Version = snapshot.Version
-        };
-
-        foreach (var @event in later)
-        {
-            if (@event.AssetId != asset.Id)
-                return new CorruptAssetHistory();
-            asset.ReplayEvent(@event);
-        }
-
-        return asset;
-    }
-
-    public AssetSnapshot ToSnapshot() => new(Id, AccountId, Ticker, Available.Value, Blocked.Value, Version);
 
     public Result<Asset, IPortfolioError> Deposit(Quantity quantity, DateTimeOffset now)
     {
-        if (IsRemoved)
-            return new AssetNotFound();
         if (Validate(quantity) is { } invalid)
             return Result<Asset, IPortfolioError>.Error(invalid);
         if (!Total.CanAdd(quantity))
@@ -93,37 +63,44 @@ public sealed class Asset : EventSourcedEntity
         return Raise(new AssetDeposited(Id, AccountId, Ticker, quantity, now));
     }
 
-    public Result<Asset, IPortfolioError> Block(Quantity quantity, DateTimeOffset now)
+    // Blocks the quantity under the reservation id. Repeating the same reservation changes nothing.
+    public Result<Asset, IPortfolioError> Reserve(Guid reservationId, Quantity quantity, DateTimeOffset now)
     {
-        if (IsRemoved)
-            return new AssetNotFound();
+        if (_reserved.TryGetValue(reservationId, out var reserved))
+            return reserved == quantity.Value ? this : new ReservationConflict();
         if (Validate(quantity) is { } invalid)
             return Result<Asset, IPortfolioError>.Error(invalid);
         if (quantity > Available)
             return new InsufficientAvailableQuantity();
-        return Raise(new AssetBlocked(Id, quantity, now));
+        return Raise(new AssetBlocked(Id, quantity, now, reservationId));
     }
 
-    public Result<Asset, IPortfolioError> Withdraw(Quantity quantity, DateTimeOffset now)
+    // Withdraws part of a reservation (never more than what is left); when closing, the leftover is unblocked.
+    // Repeating an operation, or settling a closed reservation, changes nothing.
+    public Result<Asset, IPortfolioError> Settle(Guid reservationId, Guid operationId, long quantity, bool close, DateTimeOffset now)
     {
-        if (IsRemoved)
-            return new AssetNotFound();
-        if (Validate(quantity) is { } invalid)
-            return Result<Asset, IPortfolioError>.Error(invalid);
-        if (quantity > Blocked)
-            return new InsufficientBlockedQuantity();
-        return Raise(new AssetWithdrawn(Id, quantity, now));
+        if (_settlements.Contains(operationId))
+            return this;
+        if (!_remaining.TryGetValue(reservationId, out var remaining))
+            return new ReservationNotFound();
+        if (remaining == 0)
+            return this;
+
+        var settled = Math.Min(quantity, remaining);
+        if (settled > 0)
+            RaiseEvent(new AssetWithdrawn(Id, Quantity.TryCreate(settled).ResultValue, now, reservationId, operationId));
+
+        return close || settled == remaining ? CloseReservation(reservationId, now) : this;
     }
 
-    public Result<Asset, IPortfolioError> Unblock(Quantity quantity, DateTimeOffset now)
+    // Unblocks what is still held by the reservation. Closed reservations change nothing.
+    public Result<Asset, IPortfolioError> CloseReservation(Guid reservationId, DateTimeOffset now)
     {
-        if (IsRemoved)
-            return new AssetNotFound();
-        if (Validate(quantity) is { } invalid)
-            return Result<Asset, IPortfolioError>.Error(invalid);
-        if (quantity > Blocked)
-            return new InsufficientBlockedQuantity();
-        return Raise(new AssetUnblocked(Id, quantity, now));
+        if (!_remaining.TryGetValue(reservationId, out var remaining))
+            return new ReservationNotFound();
+        if (remaining > 0)
+            RaiseEvent(new AssetUnblocked(Id, Quantity.TryCreate(remaining).ResultValue, now, reservationId));
+        return this;
     }
 
     private static IPortfolioError? Validate(Quantity quantity) =>
@@ -147,13 +124,18 @@ public sealed class Asset : EventSourcedEntity
             case AssetBlocked blocked:
                 Available = Available.Subtract(blocked.Quantity);
                 Blocked = Blocked.Add(blocked.Quantity);
+                _reserved[blocked.ReservationId] = blocked.Quantity.Value;
+                _remaining[blocked.ReservationId] = blocked.Quantity.Value;
                 break;
             case AssetWithdrawn withdrawn:
                 Blocked = Blocked.Subtract(withdrawn.Quantity);
+                _remaining[withdrawn.ReservationId] -= withdrawn.Quantity.Value;
+                _settlements.Add(withdrawn.OperationId);
                 break;
             case AssetUnblocked unblocked:
                 Blocked = Blocked.Subtract(unblocked.Quantity);
                 Available = Available.Add(unblocked.Quantity);
+                _remaining[unblocked.ReservationId] -= unblocked.Quantity.Value;
                 break;
         }
     }

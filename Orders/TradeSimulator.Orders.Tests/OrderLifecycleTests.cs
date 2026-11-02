@@ -62,15 +62,12 @@ public sealed class OrderLifecycleTests
     }
 
     [Fact]
-    public void Legacy_opening_rehydrates_as_pending_new_with_the_same_version()
+    public void Order_id_is_derived_from_the_request_hash()
     {
-        var order = NewOrder();
+        var hash = RequestHash.TryCreate(new string('a', 64)).ResultValue;
 
-        var restored = Order.Rehydrate(order.UncommittedEvents.Cast<OrderEvent>().ToList(), legacyOpening: true).ResultValue;
-
-        Assert.Equal(OrderState.PendingNew, restored.State);
-        Assert.Equal(1, restored.Version);
-        Assert.False(restored.Ack(At(1)).IsError);
+        Assert.Equal(OrderId.For(hash), OrderId.For(hash));
+        Assert.False(OrderId.TryCreate(OrderId.For(hash).Guid).IsError);
     }
 
     [Fact]

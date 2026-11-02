@@ -22,8 +22,6 @@ public readonly record struct Quantity : IComparable<Quantity>
     public static bool operator <=(Quantity left, Quantity right) => left.Value <= right.Value;
     public static bool operator >=(Quantity left, Quantity right) => left.Value >= right.Value;
 
-    internal static Quantity Restore(long value) => new(value);
-
     internal bool CanAdd(Quantity other) => Value <= long.MaxValue - other.Value;
 
     internal Quantity Add(Quantity other) => new(Value + other.Value);

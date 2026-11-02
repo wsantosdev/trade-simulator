@@ -12,43 +12,14 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_events_stream_version
     ON events(stream_id, version);
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_events_single_submitted
-    ON events(stream_id)
-    WHERE event_type IN ('OrderSubmitted', 'OrderSent');
-
-CREATE TABLE IF NOT EXISTS snapshots (
-    stream_id UUID PRIMARY KEY,
-    version INT NOT NULL CHECK (version > 0),
-    payload JSONB NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Idempotency of the client submission; kept apart so that events has no nullable column.
-CREATE TABLE IF NOT EXISTS order_requests (
-    request_hash CHAR(64) PRIMARY KEY,
-    stream_id UUID NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS event_outbox (
     position BIGINT PRIMARY KEY REFERENCES events(id),
     event_type TEXT NOT NULL,
     payload JSONB NOT NULL,
+    traceparent TEXT NULL,
     published_at TIMESTAMPTZ NULL
 );
-
--- The CASCADE above drops the old foreign key; this restores it against events.
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'event_outbox'::regclass AND contype = 'f') THEN
-        ALTER TABLE event_outbox ADD CONSTRAINT event_outbox_position_fkey FOREIGN KEY (position) REFERENCES events(id);
-    END IF;
-END $$;
-
-ALTER TABLE event_outbox ADD COLUMN IF NOT EXISTS traceparent TEXT NULL;
 
 CREATE INDEX IF NOT EXISTS ix_event_outbox_pending_position
     ON event_outbox(position)
     WHERE published_at IS NULL;
-
--- Read models live in MongoDB (see PATTERNS.md); the event store has none.
-DROP TABLE IF EXISTS order_read_model;

@@ -2,136 +2,42 @@ using Moonad;
 using TradeSimulator.Portfolio.Common;
 using TradeSimulator.Portfolio.Domain;
 using TradeSimulator.Portfolio.Domain.Entities;
+using TradeSimulator.Portfolio.Domain.Events;
 using TradeSimulator.Portfolio.Domain.ValueObjects;
-using TradeSimulator.Portfolio.Processors.PortfolioCommands;
 
 namespace TradeSimulator.Portfolio.Tests;
 
+// Keeps the saved events in memory and rebuilds assets from them, like the real store does.
 internal sealed class FakeStore : IAssetStore
 {
-    public Dictionary<AssetId, Asset> Assets { get; } = [];
-    public List<PortfolioCommandResult> Responses { get; } = [];
-    public Exception? FailWith { get; set; }
-    public int ConflictsLeft { get; set; }
-    public bool DuplicateEnvelope { get; set; }
-    public Dictionary<Guid, OrderReservation> Reservations { get; } = [];
-    public List<Result<AssetsBlocked, AssetBlockError>> ReservationResponses { get; } = [];
-    public HashSet<Guid> SeenEnvelopes { get; } = [];
+    private readonly Dictionary<AssetId, List<AssetEvent>> _streams = [];
 
-    public Task<Result<Asset, IPortfolioError>> LoadAsync(Guid assetId, CancellationToken cancellationToken) =>
-        Task.FromResult<Result<Asset, IPortfolioError>>(new AssetNotFound());
+    public IEnumerable<Asset> Assets => _streams.Values.Select(Rebuild);
 
-    public Task<Result<Asset, IPortfolioError>> ReserveAsync(
-        Guid envelopeId, Asset asset, OrderReservation reservation, AssetsBlocked blocked, CancellationToken cancellationToken, bool notify = true)
+    public async Task<Result<Asset, IPortfolioError>> ExecuteAsync(
+        AssetId id, Func<Asset?, Result<Asset, IPortfolioError>> operation, CancellationToken cancellationToken)
     {
-        if (!SeenEnvelopes.Add(envelopeId) || Reservations.ContainsKey(reservation.OrderId))
-            return Task.FromResult<Result<Asset, IPortfolioError>>(new DuplicateEnvelope());
+        var result = operation(_streams.TryGetValue(id, out var history) ? Rebuild(history) : null);
+        if (result.IsError)
+            return result;
 
-        Assets[asset.Id] = Asset.Restore(asset.ToSnapshot(), []).ResultValue;
-        Reservations[reservation.OrderId] = reservation;
-        if (notify)
-            ReservationResponses.Add(blocked);
+        var asset = result.ResultValue;
+        if (asset.UncommittedEvents.Count > 0)
+            _streams[id] = [.. _streams.GetValueOrDefault(id) ?? [], .. asset.UncommittedEvents.Cast<AssetEvent>()];
         asset.CommitEvents();
-        return Task.FromResult<Result<Asset, IPortfolioError>>(asset);
+        return await Task.FromResult(result);
     }
 
-    public Task<bool> RejectReservationAsync(Guid envelopeId, AssetBlockError error, CancellationToken cancellationToken)
+    public Task<Result<Asset, IPortfolioError>> GetAsync(AssetId id, CancellationToken cancellationToken) =>
+        Task.FromResult<Result<Asset, IPortfolioError>>(_streams.TryGetValue(id, out var history) ? Rebuild(history) : new AssetNotFound());
+
+    public Task<Result<AssetId, IPortfolioError>> FindByReservationAsync(Guid reservationId, CancellationToken cancellationToken)
     {
-        if (!SeenEnvelopes.Add(envelopeId))
-            return Task.FromResult(false);
-        ReservationResponses.Add(error);
-        return Task.FromResult(true);
+        var stream = _streams.FirstOrDefault(s => s.Value.OfType<AssetBlocked>().Any(b => b.ReservationId == reservationId));
+        return Task.FromResult<Result<AssetId, IPortfolioError>>(stream.Value is null ? new ReservationNotFound() : stream.Key);
     }
 
-    public Task<OrderReservation?> FindReservationAsync(Guid orderId, CancellationToken cancellationToken) =>
-        Task.FromResult(Reservations.GetValueOrDefault(orderId));
-
-    public Task<Result<bool, IPortfolioError>> SettleAsync(
-        Guid envelopeId, Asset? asset, Guid orderId, long expectedRemaining, long newRemaining, bool close, CancellationToken cancellationToken)
-    {
-        if (!SeenEnvelopes.Add(envelopeId))
-            return Task.FromResult<Result<bool, IPortfolioError>>(new DuplicateEnvelope());
-
-        if (asset is not null)
-        {
-            Assets[asset.Id] = Asset.Restore(asset.ToSnapshot(), []).ResultValue;
-            asset.CommitEvents();
-        }
-
-        Reservations[orderId] = Reservations[orderId] with { Remaining = newRemaining, Closed = close };
-        return Task.FromResult<Result<bool, IPortfolioError>>(true);
-    }
-
-    public Task<Result<Asset, IPortfolioError>> FindAsync(AccountId accountId, Ticker ticker, CancellationToken cancellationToken)
-    {
-        if (FailWith is not null)
-            throw FailWith;
-
-        var active = Assets.Values.FirstOrDefault(a => a.AccountId == accountId && a.Ticker == ticker && !a.IsRemoved);
-        return Task.FromResult<Result<Asset, IPortfolioError>>(active is null ? new AssetNotFound() : Asset.Restore(active.ToSnapshot(), []).ResultValue);
-    }
-
-    public Task<Result<Asset, IPortfolioError>> CreateAsync(Asset asset, PortfolioCommandResult result, CancellationToken cancellationToken) =>
-        Save(asset, result);
-
-    public Task<Result<Asset, IPortfolioError>> AppendAsync(Asset asset, PortfolioCommandResult result, CancellationToken cancellationToken) =>
-        Save(asset, result);
-
-    private Task<Result<Asset, IPortfolioError>> Save(Asset asset, PortfolioCommandResult result)
-    {
-        if (DuplicateEnvelope)
-            return Task.FromResult<Result<Asset, IPortfolioError>>(new DuplicateEnvelope());
-
-        if (ConflictsLeft > 0)
-        {
-            ConflictsLeft--;
-            return Task.FromResult<Result<Asset, IPortfolioError>>(new ConcurrencyConflict());
-        }
-
-        Assets[asset.Id] = Asset.Restore(asset.ToSnapshot(), []).ResultValue;
-        Responses.Add(result);
-        return Task.FromResult<Result<Asset, IPortfolioError>>(asset);
-    }
-}
-
-internal sealed class FakeIdempotency : IIdempotencyStore
-{
-    public HashSet<Guid> Processed { get; } = [];
-    public HashSet<Guid> Locked { get; } = [];
-    public int Disposed { get; set; }
-
-    public Task<IEnvelopeLease?> TryLockAsync(Guid envelopeId, CancellationToken cancellationToken) =>
-        Task.FromResult<IEnvelopeLease?>(Locked.Add(envelopeId) ? new Lease(this, envelopeId) : null);
-
-    internal sealed class Lease(FakeIdempotency owner, Guid id) : IEnvelopeLease
-    {
-        public Task<bool> WasProcessedAsync(CancellationToken cancellationToken) => Task.FromResult(owner.Processed.Contains(id));
-
-        public Task MarkProcessedAsync(CancellationToken cancellationToken)
-        {
-            owner.Processed.Add(id);
-            return Task.CompletedTask;
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            owner.Locked.Remove(id);
-            owner.Disposed++;
-            return ValueTask.CompletedTask;
-        }
-    }
-}
-
-internal sealed class FakeResponses : IResponsePublisher
-{
-    public List<PortfolioCommandError> Failures { get; } = [];
-
-    public Task PublishFailureAsync(PortfolioCommandError failure, CancellationToken cancellationToken)
-    {
-        Failures.Add(failure);
-        return Task.CompletedTask;
-    }
-
+    private static Asset Rebuild(List<AssetEvent> history) => Asset.Rehydrate(history).ResultValue;
 }
 
 internal sealed class FakeNotifier : IAssetNotifier

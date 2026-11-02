@@ -1,7 +1,7 @@
-using System.Text;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
+using TradeSimulator.Commons.Messaging;
+using TradeSimulator.Commons.Telemetry;
 using TradeSimulator.Exchange.Infrastructure.Serialization;
+using TradeSimulator.Exchange.Infrastructure.Telemetry;
 using TradeSimulator.Exchange.Processors.OfferBook;
 
 namespace TradeSimulator.Exchange.Infrastructure.Messaging;
@@ -9,71 +9,25 @@ namespace TradeSimulator.Exchange.Infrastructure.Messaging;
 public sealed class RabbitMqOfferBookInterestConsumer(
     IConfiguration configuration,
     OfferBookInterestProcessor processor,
-    ILogger<RabbitMqOfferBookInterestConsumer> logger) : BackgroundService
+    ILogger<RabbitMqOfferBookInterestConsumer> logger) : RabbitMqConsumer(configuration, logger)
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    private readonly ILogger _logger = logger;
+
+    protected override ServiceTelemetry Telemetry => ExchangeTelemetry.Service;
+    protected override string ExchangeName => OfferBookTopology.InterestExchange;
+    protected override string QueueName => OfferBookTopology.InterestQueue;
+    protected override IReadOnlyList<string> RoutingKeys => ["#"];
+    // Interest is a heartbeat and snapshots are requested again on a gap, so a failure is not retried.
+    protected override bool AutoAck => true;
+    protected override IDictionary<string, object?> QueueArguments =>
+        new Dictionary<string, object?> { ["x-message-ttl"] = OfferBookTopology.InterestMessageTtlMilliseconds };
+
+    protected override async Task HandleAsync(string body, CancellationToken cancellationToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await ConsumeAsync(stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Offer book interest consumer failed; reconnecting.");
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-            }
-        }
-    }
-
-    private async Task ConsumeAsync(CancellationToken stoppingToken)
-    {
-        var factory = new ConnectionFactory
-        {
-            Uri = new Uri(configuration["RabbitMq:Uri"] ?? "amqp://localhost:5672/")
-        };
-        await using var connection = await factory.CreateConnectionAsync(stoppingToken);
-        await using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
-        await channel.ExchangeDeclareAsync(
-            OfferBookTopology.InterestExchange, ExchangeType.Topic, durable: true, cancellationToken: stoppingToken);
-        await channel.QueueDeclareAsync(
-            OfferBookTopology.InterestQueue, durable: true, exclusive: false, autoDelete: false,
-            arguments: new Dictionary<string, object?> { ["x-message-ttl"] = OfferBookTopology.InterestMessageTtlMilliseconds },
-            cancellationToken: stoppingToken);
-        await channel.QueueBindAsync(OfferBookTopology.InterestQueue, OfferBookTopology.InterestExchange, "#", cancellationToken: stoppingToken);
-
-        var shutdown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        connection.ConnectionShutdownAsync += (_, _) =>
-        {
-            shutdown.TrySetResult();
-            return Task.CompletedTask;
-        };
-
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (_, delivery) =>
-        {
-            try
-            {
-                var command = OfferBookInterestParser.Parse(Encoding.UTF8.GetString(delivery.Body.Span), MessageJson.Options);
-                if (command.IsError)
-                    logger.LogWarning("Dropped a malformed offer book interest message.");
-                else
-                    await processor.ProcessAsync(command.ResultValue, stoppingToken);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // Interest is a heartbeat and snapshots are requested again on a gap, so a failure here is not retried.
-                logger.LogError(exception, "Could not process an offer book interest message.");
-            }
-        };
-        await channel.BasicConsumeAsync(OfferBookTopology.InterestQueue, autoAck: true, consumer, stoppingToken);
-        logger.LogInformation("Consuming offer book interest from {Queue}.", OfferBookTopology.InterestQueue);
-
-        await Task.WhenAny(shutdown.Task, Task.Delay(Timeout.Infinite, stoppingToken));
+        var command = OfferBookInterestParser.Parse(body, MessageJson.Options);
+        if (command.IsError)
+            _logger.LogWarning("Dropped a malformed offer book interest message.");
+        else
+            await processor.ProcessAsync(command.ResultValue, cancellationToken);
     }
 }

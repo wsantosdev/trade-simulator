@@ -12,14 +12,16 @@ public static class ReserveFundsEndpoint
             IReserveFunds reserveFunds,
             CancellationToken cancellationToken) =>
         {
-            var result = await reserveFunds.ExecuteAsync(id, request.Amount, cancellationToken);
+            var result = await reserveFunds.ExecuteAsync(request.ReservationId, id, request.Amount, cancellationToken);
             return result.IsError
                 ? result.ErrorValue.ToHttpResult()
-                : Results.Ok(AccountResponse.From(result.ResultValue));
+                : Results.Ok(new ReserveFundsResponse(request.ReservationId, id, request.Amount));
         });
 
         return endpoints;
     }
 }
 
-public sealed record ReserveFundsRequest(decimal Amount);
+public sealed record ReserveFundsRequest(Guid ReservationId, decimal Amount);
+
+public sealed record ReserveFundsResponse(Guid ReservationId, Guid AccountId, decimal Amount);

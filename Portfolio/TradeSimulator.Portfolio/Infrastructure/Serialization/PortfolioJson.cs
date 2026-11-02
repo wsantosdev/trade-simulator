@@ -1,7 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using TradeSimulator.Portfolio.Processors.PortfolioCommands;
-using TradeSimulator.Portfolio.Infrastructure.Messaging;
 
 namespace TradeSimulator.Portfolio.Infrastructure.Serialization;
 
@@ -17,8 +15,6 @@ public static class PortfolioJson
         options.Converters.Add(new AssetIdJsonConverter());
         options.Converters.Add(new TickerJsonConverter());
         options.Converters.Add(new QuantityJsonConverter());
-        options.Converters.Add(new ResultJsonConverter<PortfolioCommandResult, PortfolioCommandError>());
-        options.Converters.Add(new ResultJsonConverter<AssetsBlocked, AssetBlockError>());
         options.Converters.Add(new JsonStringEnumConverter());
         return options;
     }

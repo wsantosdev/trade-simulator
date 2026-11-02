@@ -2,7 +2,6 @@ using Npgsql;
 using Testcontainers.MongoDb;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
-using Testcontainers.Redis;
 using Xunit;
 
 namespace TradeSimulator.Testing;
@@ -12,22 +11,19 @@ public sealed class InfrastructureFixture : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
     private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder("rabbitmq:4-management-alpine").Build();
-    private readonly RedisContainer _redis = new RedisBuilder("redis:7-alpine").Build();
 
     private readonly MongoDbContainer _mongo = new MongoDbBuilder("mongo:7").Build();
 
     public string MongoConnection => _mongo.GetConnectionString();
     public string RabbitMqUri => _rabbit.GetConnectionString();
-    public string RedisConnection => _redis.GetConnectionString();
 
     public async Task InitializeAsync() =>
-        await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync(), _redis.StartAsync(), _mongo.StartAsync());
+        await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync(), _mongo.StartAsync());
 
     public async Task DisposeAsync()
     {
         await _postgres.DisposeAsync();
         await _rabbit.DisposeAsync();
-        await _redis.DisposeAsync();
         await _mongo.DisposeAsync();
     }
 
