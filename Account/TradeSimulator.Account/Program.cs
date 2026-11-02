@@ -1,4 +1,5 @@
 using TradeSimulator.Commons.Messaging;
+using TradeSimulator.Outbox;
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
 using StackExchange.Redis;
@@ -10,6 +11,7 @@ using TradeSimulator.Account.Processors.OrderFunds;
 using TradeSimulator.Account.Domain.Entities;
 using TradeSimulator.Account.Features.Deposit;
 using TradeSimulator.Account.Features.GetAccount;
+using TradeSimulator.Account.Features.Stream;
 using TradeSimulator.Account.Features.OpenAccount;
 using TradeSimulator.Account.Features.ReserveFunds;
 using TradeSimulator.Account.Features.WithdrawFunds;
@@ -48,25 +50,23 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton<IAccountStore>(sp =>
     new InvalidatingAccountStore(sp.GetRequiredService<PostgresAccountStore>(), sp.GetRequiredService<IFundsGate>()));
+builder.Services.AddSingleton<TradeSimulator.Account.Features.Stream.IAccountStream>(sp => sp.GetRequiredService<PostgresAccountStore>());
 builder.Services.AddSingleton<IAccountMetrics, AccountMetrics>();
 builder.Services.AddSingleton<IDeposit, DepositHandler>();
 builder.Services.AddSingleton<IWithdrawFunds, WithdrawFundsHandler>();
 builder.Services.AddSingleton<IReserveFunds, ReserveFundsHandler>();
 builder.Services.AddSingleton<IGetAccount, GetAccountHandler>();
 builder.Services.AddSingleton<IOpenAccount, OpenAccountHandler>();
-builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresAccountStore>());
-builder.Services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
-builder.Services.AddHostedService<OutboxPublisherService>();
 builder.Services.AddSingleton<IOrderFundsStore>(sp => sp.GetRequiredService<PostgresAccountStore>());
-builder.Services.AddSingleton<IResponseOutbox>(sp => sp.GetRequiredService<PostgresAccountStore>());
+builder.Services.AddSingleton<IOutboxStore<PendingResponse>>(sp => sp.GetRequiredService<PostgresAccountStore>());
 builder.Services.AddHttpClient<IOfferBookClient, HttpOfferBookClient>(client =>
 {
     client.BaseAddress = new Uri((builder.Configuration["OfferBook:BaseUrl"] ?? "http://localhost:5050").TrimEnd('/') + "/");
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 builder.Services.AddSingleton<OrderFundsProcessor>();
-builder.Services.AddSingleton<IResponsePublisher, RabbitMqResponsePublisher>();
-builder.Services.AddHostedService<ResponseOutboxPublisherService>();
+builder.Services.AddSingleton<IOutboxPublisher<PendingResponse>, RabbitMqResponsePublisher>();
+builder.Services.AddOutboxPublisher<PendingResponse>("account responses", TimeSpan.FromSeconds(1));
 builder.Services.AddHostedService<OrderScheduleCancelledConsumer>();
 builder.Services.AddHostedService<ExchangeEventConsumer>();
 
@@ -113,6 +113,7 @@ if (app.Environment.IsDevelopment())
 app.MapTradeSimulatorHealth();
 app.MapOpenAccountEndpoint();
 app.MapGetAccountEndpoint();
+app.MapAccountStreamEndpoints();
 app.MapDepositEndpoint();
 app.MapWithdrawEndpoint();
 app.MapReserveFundsEndpoint();

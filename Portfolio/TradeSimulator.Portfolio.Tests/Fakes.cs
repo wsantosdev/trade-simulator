@@ -132,7 +132,6 @@ internal sealed class FakeResponses : IResponsePublisher
         return Task.CompletedTask;
     }
 
-    public Task PublishPendingAsync(PendingResponse pending, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 internal sealed class FakeNotifier : IAssetNotifier

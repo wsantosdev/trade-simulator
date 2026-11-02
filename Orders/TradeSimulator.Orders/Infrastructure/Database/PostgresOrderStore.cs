@@ -1,3 +1,4 @@
+using TradeSimulator.Outbox;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -16,7 +17,7 @@ using TradeSimulator.Orders.Domain.ValueObjects;
 namespace TradeSimulator.Orders.Infrastructure.Database;
 
 public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<PostgresOrderStore> logger)
-    : IOrderStore, IOutbox, IOutboxBacklogReader
+    : IOrderStore, IOutboxStore<PendingEvent>, IOutboxBacklogReader
 {
     private static readonly EventStore Events = OrderEventSerializer.CreateStore();
 

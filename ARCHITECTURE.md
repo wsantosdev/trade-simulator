@@ -35,7 +35,7 @@ Infraestrutura: PostgreSQL (eventos) · MongoDB (read models) · Redis (gate/ide
 | **Quotes / OfferBook** | Retransmitem cotações e livro por SignalR; sem banco. | — |
 | **UI** | Três aplicações Angular. | — |
 
-Bibliotecas compartilhadas em `Shared/`: `TradeSimulator.Commons` (envelope de mensagens, conversores JSON, telemetria), `TradeSimulator.EventSourcing` (`IEvent`, `EventSourcedEntity`, `EventStore`) e `TradeSimulator.Testing` (fixtures de integração).
+Bibliotecas compartilhadas em `Shared/`: `TradeSimulator.Commons` (envelope de mensagens, conversores JSON, telemetria), `TradeSimulator.EventSourcing` (`IEvent`, `EventSourcedEntity`, `EventStore`), `TradeSimulator.Outbox` (worker genérico de publicação do outbox) e `TradeSimulator.Testing` (fixtures de integração).
 
 ## Estrutura interna de cada serviço
 
@@ -56,10 +56,13 @@ Erros esperados são valores (`Result<T, TError>`); o mapeamento para HTTP fica 
   - `events` — log append-only (`id`, `stream_id`, `event_type`, `version`, `occurred_at`, `payload` jsonb), único em `(stream_id, version)`, que dá a concorrência otimista.
   - `snapshots` — estado do agregado para reidratação (Account: a cada 10 eventos), com `version` e `updated_at`.
   - Account: `account_balances` — read model de saldo (conta, saldo livre e bloqueado), gravado na mesma transação dos eventos (imediatamente consistente).
-  - `event_outbox` — mensagens pendentes de publicação.
+  - `event_outbox` — mensagens pendentes de publicação (em Account existe por padronização, mas não é usada: a conta não publica eventos).
   - Tabelas auxiliares do serviço (`order_requests`, `order_reservations`, `active_assets`, `processed_*`, `response_outbox`).
 - Timestamps são sempre UTC (`timestamptz`); só a UI converte para o fuso local.
-- **MongoDB** guarda os **read models** (CQRS). Cada evento de um agregado vai para o *outbox* (mesma transação do append) e, pela fila, chega a um *handler* do próprio serviço que reconstrói a visão e a grava com guarda de versão. **Não há polling do stream.** **Nenhuma event store tem métodos de read model.**
+- **Read models (CQRS)**:
+  - **Orders e Portfolio** → **MongoDB**. Cada evento do agregado vai para o *outbox* (mesma transação do append) e, por uma fila dedicada (`orders.read-model`, `portfolio.read-model`), chega a um *handler* do próprio serviço, que reconstrói a visão e a grava com guarda de versão. **Não há polling do stream.**
+  - **Account** → **Postgres** (`account_balances`), na mesma transação do agregado; sem fila nem Mongo.
+  - **Nenhuma event store tem métodos de read model.**
 - **Redis** serve de gate atômico (script Lua) para reserva de saldo e de chave de idempotência/lease no Portfolio.
 
 ## Event Sourcing
@@ -78,9 +81,13 @@ Erros esperados são valores (`Result<T, TError>`); o mapeamento para HTTP fica 
 2. Orders despacha o comando à Exchange via outbox.
 3. A Exchange casa no livro e publica eventos (aceita, executada parcial/total, cancelada, substituída, rejeitada).
 4. Orders atualiza o estado; Account debita/libera saldo e Portfolio movimenta ativos a partir dos mesmos eventos.
-5. Os handlers de projeção (disparados pelos eventos do outbox) atualizam o MongoDB e a UI consulta os read models.
+5. Em Orders e Portfolio, os handlers de projeção (disparados pelos eventos do outbox) atualizam o MongoDB; em Account o saldo já foi atualizado na transação. A UI consulta os read models.
 
 ## Implantação e observabilidade
 
 - `compose.yaml` sobe Postgres, MongoDB, Redis, RabbitMQ, os seis serviços e a UI; `database/init-schemas.sql` cria o usuário e os schemas, e cada serviço aplica seu `schema.sql` embutido (idempotente, com migração) ao iniciar.
 - OpenTelemetry: traces propagados pelas mensagens, métricas de negócio e de backlog do outbox, health checks de liveness/readiness; exportação via OTLP quando configurada.
+
+## Replay e correção da conta
+
+A UI `/account/stream` mostra o stream da conta com o saldo após cada evento, permite incluir um depósito/saque numa posição (deslocando as versões seguintes) e reconstruir `account_balances`/snapshot por replay. Ver PATTERNS.md ("Account — replay e correção do stream").

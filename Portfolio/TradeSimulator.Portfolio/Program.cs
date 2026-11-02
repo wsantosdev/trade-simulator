@@ -1,4 +1,5 @@
 using TradeSimulator.Commons.Messaging;
+using TradeSimulator.Outbox;
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
 using StackExchange.Redis;
@@ -53,7 +54,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
     }));
 builder.Services.AddSingleton<PostgresAssetStore>();
 builder.Services.AddSingleton<IAssetStore>(sp => sp.GetRequiredService<PostgresAssetStore>());
-builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresAssetStore>());
+builder.Services.AddSingleton<IOutboxStore<PendingResponse>>(sp => sp.GetRequiredService<PostgresAssetStore>());
 builder.Services.AddOutboxBacklogMonitor<PostgresAssetStore>();
 MongoSetup.Initialize();
 builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(
@@ -68,13 +69,15 @@ builder.Services.AddHostedService<AssetProjectionConsumer>();
 builder.Services.AddSingleton<ISearchAssets, SearchAssetsHandler>();
 builder.Services.AddSingleton<IGetAsset, GetAssetHandler>();
 builder.Services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
-builder.Services.AddSingleton<IResponsePublisher, RabbitMqResponsePublisher>();
+builder.Services.AddSingleton<RabbitMqResponsePublisher>();
+builder.Services.AddSingleton<IResponsePublisher>(sp => sp.GetRequiredService<RabbitMqResponsePublisher>());
+builder.Services.AddSingleton<IOutboxPublisher<PendingResponse>>(sp => sp.GetRequiredService<RabbitMqResponsePublisher>());
 builder.Services.AddSingleton<IAssetNotifier, SignalRAssetNotifier>();
 builder.Services.AddSingleton<PortfolioCommandProcessor>();
 builder.Services.AddSingleton<PortfolioCommandMessageHandler>();
 builder.Services.AddSingleton<OrderEventMessageHandler>();
 builder.Services.AddSingleton<ExchangeEventMessageHandler>();
-builder.Services.AddHostedService<ResponseOutboxPublisherService>();
+builder.Services.AddOutboxPublisher<PendingResponse>("portfolio responses", TimeSpan.FromMilliseconds(200));
 builder.Services.AddHostedService<PortfolioCommandConsumer>();
 builder.Services.AddHostedService<OrderEventConsumer>();
 builder.Services.AddHostedService<ExchangeEventConsumer>();

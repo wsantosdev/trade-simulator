@@ -27,6 +27,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\..\Shared\TradeSimulator.Commons\TradeSimulator.Commons.csproj" />
+        <ProjectReference Include="..\..\Shared\TradeSimulator.Outbox\TradeSimulator.Outbox.csproj" />
         <ProjectReference Include="..\..\Shared\TradeSimulator.EventSourcing\TradeSimulator.EventSourcing.csproj" />
     </ItemGroup>
 

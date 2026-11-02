@@ -22,7 +22,6 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
             ["RabbitMq:Uri"] = infrastructure.RabbitMqUri
         });
         _rabbit = await RabbitMqProbe.ConnectAsync(infrastructure.RabbitMqUri);
-        await _rabbit.ListenAsync("account.events");
         await _rabbit.ListenAsync("trade-simulator.account.reservations");
         _client = _factory.CreateClient();
     }
@@ -35,7 +34,7 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
     }
 
     [Fact]
-    public async Task Deposit_is_persisted_in_postgres_and_published_through_the_outbox_to_rabbitmq()
+    public async Task Deposit_is_persisted_and_updates_the_balance()
     {
         var accountId = await OpenAccountAsync();
 
@@ -44,11 +43,42 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
 
         var account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
         Assert.Equal(250.75m, account.GetProperty("availableBalance").GetDecimal());
+    }
 
-        var published = await _rabbit.NextAsync(m => m.RoutingKey.Contains("Deposit", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(accountId.ToString(), published.Body);
-        Assert.NotNull(published.Headers);
-        Assert.True(published.Headers!.ContainsKey("traceparent"));
+    [Fact]
+    public async Task Inserting_an_event_shifts_later_versions_and_rebuilds_the_balance()
+    {
+        var accountId = await OpenAccountAsync();
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 100m });
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/withdrawals", new { amount = 60m });
+
+        var inserted = await _client.PostAsJsonAsync($"/api/accounts/{accountId}/stream/events",
+            new { position = 3, type = "deposit", amount = 25m });
+        Assert.Equal(HttpStatusCode.OK, inserted.StatusCode);
+
+        var view = await inserted.Content.ReadFromJsonAsync<JsonElement>();
+        var versions = view.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("eventType").GetString()).ToArray();
+        Assert.Equal(["AccountOpened", "MoneyDeposited", "MoneyDeposited", "MoneyWithdrawn"], versions);
+        Assert.Equal(65m, view.GetProperty("availableBalance").GetDecimal());
+        Assert.True(view.GetProperty("inSync").GetBoolean());
+        var account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
+        Assert.Equal(65m, account.GetProperty("availableBalance").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Inserting_an_event_that_invalidates_the_replay_is_rejected_and_changes_nothing()
+    {
+        var accountId = await OpenAccountAsync();
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 100m });
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/withdrawals", new { amount = 60m });
+
+        var rejected = await _client.PostAsJsonAsync($"/api/accounts/{accountId}/stream/events",
+            new { position = 2, type = "withdrawal", amount = 10m });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, rejected.StatusCode);
+
+        var view = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}/stream");
+        Assert.Equal(3, view.GetProperty("events").GetArrayLength());
+        Assert.Equal(40m, view.GetProperty("availableBalance").GetDecimal());
     }
 
     [Fact]

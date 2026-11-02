@@ -1,3 +1,4 @@
+using TradeSimulator.Outbox;
 using System.Text;
 using RabbitMQ.Client;
 using TradeSimulator.Commons.Telemetry;
@@ -6,7 +7,7 @@ using TradeSimulator.Orders.Infrastructure.Telemetry;
 
 namespace TradeSimulator.Orders.Infrastructure.Messaging;
 
-public sealed class RabbitMqCommandPublisher(IConfiguration configuration) : ICommandPublisher, IAsyncDisposable
+public sealed class RabbitMqCommandPublisher(IConfiguration configuration) : IOutboxPublisher<PendingEvent>, IAsyncDisposable
 {
     public const string ExchangeName = "trade-simulator-order-commands";
     public const string EventsExchangeName = "trade-simulator.orders.events";

@@ -18,7 +18,7 @@ Cada módulo é um microsserviço .NET 10 independente, com seu próprio projeto
 | **OfferBook** | 8085 | Livro de ofertas em tempo real, via SignalR. |
 | **UI** | 4200 / 4201 / 4204 | Angular. App principal em `4200` (conta, ordens, carteira, cotações, livro); home broker com janelas flutuantes em `4201`; UI da bolsa em `4204`. |
 
-`Shared/TradeSimulator.Commons` contém apenas o que é comum aos serviços na comunicação: `EventEnvelope<T>` e conversores JSON. `Shared/TradeSimulator.EventSourcing` contém `IEvent`, `EventStore` (serialização + append/leitura na tabela `events`, tipos descobertos por assembly) e `EventSourcedEntity` (base dos agregados Account, Order e Asset).
+`Shared/TradeSimulator.Commons` contém apenas o que é comum aos serviços na comunicação: `EventEnvelope<T>` e conversores JSON. `Shared/TradeSimulator.EventSourcing` contém `IEvent`, `EventStore` (serialização + append/leitura na tabela `events`, tipos descobertos por assembly) e `EventSourcedEntity` (base dos agregados Account, Order e Asset). `Shared/TradeSimulator.Outbox` contém o worker genérico que publica as tabelas outbox.
 
 ## Como funciona
 

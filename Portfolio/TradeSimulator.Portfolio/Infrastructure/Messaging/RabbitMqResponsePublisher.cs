@@ -1,3 +1,4 @@
+using TradeSimulator.Outbox;
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
@@ -9,7 +10,7 @@ using TradeSimulator.Portfolio.Infrastructure.Serialization;
 
 namespace TradeSimulator.Portfolio.Infrastructure.Messaging;
 
-public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IResponsePublisher, IAsyncDisposable
+public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IResponsePublisher, IOutboxPublisher<PendingResponse>, IAsyncDisposable
 {
     public const string ExchangeName = "trade-simulator.portfolio.events";
     public const string FailedRoutingKey = "asset.command.failed";
@@ -27,7 +28,7 @@ public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IR
         return PublishAsync(ExchangeName, FailedRoutingKey, JsonSerializer.Serialize(response, PortfolioJson.Options), cancellationToken);
     }
 
-    public Task PublishPendingAsync(PendingResponse pending, CancellationToken cancellationToken) =>
+    public Task PublishAsync(PendingResponse pending, CancellationToken cancellationToken) =>
         PublishAsync(pending.Exchange ?? ExchangeName, pending.RoutingKey, pending.Payload, cancellationToken, pending.TraceParent);
 
     private async Task PublishAsync(string exchange, string routingKey, string payload, CancellationToken cancellationToken, string? traceParent = null)

@@ -1,3 +1,5 @@
+using TradeSimulator.Outbox;
+
 namespace TradeSimulator.Orders.Infrastructure.Messaging;
 
-public sealed record PendingEvent(long Position, string EventType, string Payload, string? TraceParent = null);
+public sealed record PendingEvent(long Position, string EventType, string Payload, string? TraceParent = null) : IOutboxItem;

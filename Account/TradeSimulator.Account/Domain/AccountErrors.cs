@@ -31,3 +31,6 @@ public readonly struct AccountNotFound : IAccountError;
 public readonly struct AccountAlreadyExists : IAccountError;
 public readonly struct CorruptAccountHistory : IAccountError;
 public readonly struct AccountPersistenceFailure : IAccountError;
+public readonly struct InvalidStreamPosition : IAccountError;
+public readonly struct UnsupportedStreamEvent : IAccountError;
+public readonly record struct StreamReplayRejected(int Version, string EventType) : IAccountError;

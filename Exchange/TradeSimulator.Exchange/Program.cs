@@ -1,4 +1,5 @@
 using TradeSimulator.Commons.Messaging;
+using TradeSimulator.Outbox;
 using Npgsql;
 using TradeSimulator.Commons.Telemetry;
 using TradeSimulator.Exchange.Features.ImportInstruments;

@@ -1,3 +1,4 @@
+using TradeSimulator.Outbox;
 using TradeSimulator.Commons.Telemetry;
 using System.Reflection;
 using System.Text.Json;
@@ -18,7 +19,7 @@ using TradeSimulator.Portfolio.Infrastructure.Serialization;
 namespace TradeSimulator.Portfolio.Infrastructure.Database;
 
 public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<PostgresAssetStore> logger)
-    : IAssetStore, IOutbox, IOutboxBacklogReader
+    : IAssetStore, IOutboxStore<PendingResponse>, IOutboxBacklogReader
 {
     public const int SnapshotInterval = 100;
     private static readonly EventStore Events = AssetEventStore.Create();

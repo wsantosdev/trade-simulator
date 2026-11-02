@@ -1,20 +1,26 @@
-using TradeSimulator.Commons.Messaging;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
+namespace TradeSimulator.Outbox;
 
-namespace TradeSimulator.Account.Infrastructure.Messaging;
+public sealed record OutboxPublisherOptions(string Name, TimeSpan IdleDelay);
 
-public sealed class ResponseOutboxPublisherService(
-    IResponseOutbox outbox,
-    IResponsePublisher publisher,
-    ILogger<ResponseOutboxPublisherService> logger) : BackgroundService
+// Drains an outbox: reads pending items, publishes each one and marks it as published.
+public sealed class OutboxPublisherService<TItem>(
+    IOutboxStore<TItem> outbox,
+    IOutboxPublisher<TItem> publisher,
+    OutboxPublisherOptions options,
+    ILogger<OutboxPublisherService<TItem>> logger) : BackgroundService where TItem : IOutboxItem
 {
+    private const int BatchSize = 50;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var pending = await outbox.ReadPendingAsync(50, stoppingToken);
+                var pending = await outbox.ReadPendingAsync(BatchSize, stoppingToken);
                 foreach (var item in pending)
                 {
                     if (stoppingToken.IsCancellationRequested)
@@ -26,7 +32,7 @@ public sealed class ResponseOutboxPublisherService(
                 }
 
                 if (pending.Count == 0)
-                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                    await Task.Delay(options.IdleDelay, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -34,7 +40,7 @@ public sealed class ResponseOutboxPublisherService(
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Failed to publish account responses from the outbox.");
+                logger.LogError(exception, "Failed to publish {Outbox} from the outbox.", options.Name);
                 await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
             }
         }

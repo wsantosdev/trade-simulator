@@ -1,3 +1,4 @@
+using TradeSimulator.Outbox;
 using System.Text;
 using RabbitMQ.Client;
 using TradeSimulator.Account.Infrastructure.Telemetry;
@@ -5,7 +6,7 @@ using TradeSimulator.Commons.Telemetry;
 
 namespace TradeSimulator.Account.Infrastructure.Messaging;
 
-public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IResponsePublisher, IAsyncDisposable
+public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IOutboxPublisher<PendingResponse>, IAsyncDisposable
 {
     public const string ExchangeName = "trade-simulator.account.reservations";
 

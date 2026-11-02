@@ -1,4 +1,5 @@
 using TradeSimulator.Commons.Messaging;
+using TradeSimulator.Outbox;
 using TradeSimulator.Exchange.Domain.ValueObjects;
 using TradeSimulator.Exchange.Processors.OrderCommands;
 

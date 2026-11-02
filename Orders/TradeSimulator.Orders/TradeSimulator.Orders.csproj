@@ -13,6 +13,7 @@
         <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
         <PackageReference Include="MongoDB.Driver" Version="3.13.0" />
         <ProjectReference Include="..\..\Shared\TradeSimulator.Commons\TradeSimulator.Commons.csproj" />
+        <ProjectReference Include="..\..\Shared\TradeSimulator.Outbox\TradeSimulator.Outbox.csproj" />
         <ProjectReference Include="..\..\Shared\TradeSimulator.EventSourcing\TradeSimulator.EventSourcing.csproj" />
         <Using Include="TradeSimulator.Commons" />
         <PackageReference Include="Moonad" Version="5.5.1" />

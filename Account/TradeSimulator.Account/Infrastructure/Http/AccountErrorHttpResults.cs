@@ -22,6 +22,10 @@ public static class AccountErrorHttpResults
             DebitExceedsProvisionedBalance => (StatusCodes.Status422UnprocessableEntity, "Insufficient provisioned balance", "A debit cannot exceed the provisioned balance."),
             PriceUnavailable => (StatusCodes.Status422UnprocessableEntity, "Price unavailable", "The market price could not be determined."),
             AccountBalanceLimitExceeded => (StatusCodes.Status422UnprocessableEntity, "Account balance limit exceeded", "The operation would exceed the maximum account balance."),
+            InvalidStreamPosition => (StatusCodes.Status422UnprocessableEntity, "Invalid stream position", "The position must be between 2 and the next version of the stream."),
+            UnsupportedStreamEvent => (StatusCodes.Status400BadRequest, "Unsupported event", "Only 'deposit' and 'withdrawal' events can be inserted."),
+            StreamReplayRejected rejected => (StatusCodes.Status422UnprocessableEntity, "Replay rejected",
+                $"The stream would become invalid: event v{rejected.Version} ({rejected.EventType}) cannot be applied. Nothing was changed."),
             AccountNotFound => (StatusCodes.Status404NotFound, "Account not found", "The requested account does not exist."),
             AccountAlreadyExists or AccountAlreadyOpened => (StatusCodes.Status409Conflict, "Account conflict", "The account already exists or has already been opened."),
             SnapshotAccountMismatch or InvalidSnapshotBalance or AccountOpeningEventMissing or EventAccountMismatch or

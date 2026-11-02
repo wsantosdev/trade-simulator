@@ -1,3 +1,4 @@
+using TradeSimulator.Outbox;
 using TradeSimulator.Commons.Telemetry;
 using System.Text.Json;
 using Moonad;
@@ -233,7 +234,7 @@ public sealed partial class PostgresAccountStore
         }
     }
 
-    async Task<IReadOnlyList<PendingResponse>> IResponseOutbox.ReadPendingAsync(int limit, CancellationToken cancellationToken)
+    async Task<IReadOnlyList<PendingResponse>> IOutboxStore<PendingResponse>.ReadPendingAsync(int limit, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT position, routing_key, payload::text, traceparent
@@ -252,7 +253,7 @@ public sealed partial class PostgresAccountStore
         return pending;
     }
 
-    async Task IResponseOutbox.MarkPublishedAsync(long position, CancellationToken cancellationToken)
+    async Task IOutboxStore<PendingResponse>.MarkPublishedAsync(long position, CancellationToken cancellationToken)
     {
         const string sql = """
             UPDATE response_outbox
