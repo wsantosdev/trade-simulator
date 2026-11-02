@@ -11,11 +11,11 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
         <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
-        <ProjectReference Include="..\..\Shared\TradeSimulator.Commons\TradeSimulator.Commons.csproj" />
         <Using Include="TradeSimulator.Commons" />
         <PackageReference Include="Moonad" Version="5.5.1" />
         <PackageReference Include="Npgsql" Version="10.0.3" />
         <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
+        <PackageReference Include="StackExchange.Redis" Version="3.4.5" />
     </ItemGroup>
 
     <ItemGroup>
@@ -23,6 +23,11 @@
       <Content Include="..\.dockerignore">
         <Link>.dockerignore</Link>
       </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\..\Shared\TradeSimulator.Commons\TradeSimulator.Commons.csproj" />
+        <ProjectReference Include="..\..\Shared\TradeSimulator.EventSourcing\TradeSimulator.EventSourcing.csproj" />
     </ItemGroup>
 
 </Project>

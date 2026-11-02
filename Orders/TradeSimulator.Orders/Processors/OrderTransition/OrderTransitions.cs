@@ -37,7 +37,7 @@ public sealed class OrderTransitions(
             : ApplyAsync(id, "scheduling", (o, now) => o.Schedule(now), cancellationToken);
 
     public Task RejectSubmissionAsync(OrderId id, string reason, CancellationToken cancellationToken) =>
-        ApplyAsync(id, $"rejection ({reason})", (o, now) => o.RejectSubmission(reason, now), cancellationToken);
+        ApplyAsync(id, $"rejection ({reason})", (o, now) => o.RejectSubmission(reason, now), cancellationToken, notify: false);
 
     public Task AckAsync(OrderId id, CancellationToken cancellationToken) =>
         ApplyAsync(id, "OrderAcked", (o, now) => o.Ack(now), cancellationToken);
@@ -64,7 +64,7 @@ public sealed class OrderTransitions(
         ApplyAsync(id, "OrderReplaceRejected", (o, now) => o.RejectReplace(now), cancellationToken);
 
     private async Task ApplyAsync(
-        OrderId id, string action, Func<Order, DateTimeOffset, Result<Order, IOrderError>> apply, CancellationToken cancellationToken)
+        OrderId id, string action, Func<Order, DateTimeOffset, Result<Order, IOrderError>> apply, CancellationToken cancellationToken, bool notify = true)
     {
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
@@ -89,7 +89,8 @@ public sealed class OrderTransitions(
             {
                 logger.LogInformation("Applied {Action} to order {OrderId}; state is {State}.", action, id, saved.ResultValue.State);
                 var after = OrderView.From(saved.ResultValue);
-                await notifier.OrderUpdatedAsync(after.AccountId, OrderChanges.Between(before, after), cancellationToken);
+                if (notify)
+                    await notifier.OrderUpdatedAsync(after.AccountId, OrderChanges.Between(before, after), cancellationToken);
                 return;
             }
 

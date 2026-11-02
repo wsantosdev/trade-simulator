@@ -23,3 +23,5 @@ public readonly struct OrderOpeningEventMissing : IOrderError;
 public readonly struct UnsupportedOrderEvent : IOrderError;
 public readonly struct CorruptOrderHistory : IOrderError;
 public readonly struct OrderPersistenceFailure : IOrderError;
+public readonly record struct SubmissionRejected(string Reason) : IOrderError;
+public readonly struct ReservationUnavailable : IOrderError;

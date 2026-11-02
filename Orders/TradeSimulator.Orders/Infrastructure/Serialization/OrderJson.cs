@@ -16,8 +16,6 @@ public static class OrderJson
         options.Converters.Add(new TickerJsonConverter());
         options.Converters.Add(new RequestHashJsonConverter());
         options.Converters.Add(new JsonStringEnumConverter());
-        options.Converters.Add(new ResultJsonConverter<FundsReserved, FundsReservationError>());
-        options.Converters.Add(new ResultJsonConverter<AssetsBlocked, AssetBlockError>());
         return options;
     }
 }

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using TradeSimulator.Testing;
@@ -18,6 +19,8 @@ public sealed class PortfolioIntegrationTests(InfrastructureFixture infrastructu
         {
             ["ConnectionStrings:Portfolio"] = await infrastructure.CreateDatabaseAsync(),
             ["ConnectionStrings:Redis"] = infrastructure.RedisConnection,
+            ["ConnectionStrings:Mongo"] = infrastructure.MongoConnection,
+            ["Mongo:Database"] = infrastructure.CreateMongoDatabaseName(),
             ["RabbitMq:Uri"] = infrastructure.RabbitMqUri
         });
         _rabbit = await RabbitMqProbe.ConnectAsync(infrastructure.RabbitMqUri);
@@ -38,40 +41,65 @@ public sealed class PortfolioIntegrationTests(InfrastructureFixture infrastructu
         var accountId = Guid.CreateVersion7();
         await DepositAsync(accountId, "PETR4", 100);
 
-        var asset = await GetAssetAsync(accountId, "PETR4");
+        var asset = await GetAssetAsync(accountId, "PETR4", available: 100);
         Assert.Equal(100, asset.GetProperty("available").GetInt64());
         Assert.Equal(0, asset.GetProperty("blocked").GetInt64());
     }
 
     [Fact]
-    public async Task Sell_order_blocks_assets_and_replies_through_rabbitmq()
+    public async Task Sell_order_reservation_blocks_assets_synchronously()
     {
         var accountId = Guid.CreateVersion7();
-        var orderId = Guid.CreateVersion7();
         await DepositAsync(accountId, "PETR4", 100);
-        await _rabbit.WaitForQueueAsync("trade-simulator.portfolio.order.events");
 
-        await PublishOrderSubmittedAsync(orderId, accountId, 40);
+        var response = await ReserveAsync(accountId, Guid.CreateVersion7(), 40);
 
-        var reply = await _rabbit.NextAsync(m => m.RoutingKey == "assets.blocked");
-        Assert.Contains(orderId.ToString(), reply.Body);
-        var asset = await GetAssetAsync(accountId, "PETR4");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var asset = await GetAssetAsync(accountId, "PETR4", available: 60);
         Assert.Equal(60, asset.GetProperty("available").GetInt64());
         Assert.Equal(40, asset.GetProperty("blocked").GetInt64());
     }
 
     [Fact]
-    public async Task Sell_order_without_enough_assets_is_rejected_through_rabbitmq()
+    public async Task Sell_order_without_position_is_rejected_with_422()
+    {
+        var response = await ReserveAsync(Guid.CreateVersion7(), Guid.CreateVersion7(), 10);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("AssetNotFound", body.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task Concurrent_sell_orders_never_block_more_than_the_position()
+    {
+        var accountId = Guid.CreateVersion7();
+        await DepositAsync(accountId, "PETR4", 100);
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => ReserveAsync(accountId, Guid.CreateVersion7(), 30)));
+
+        Assert.Equal(3, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+        var asset = await GetAssetAsync(accountId, "PETR4", available: 10);
+        Assert.Equal(10, asset.GetProperty("available").GetInt64());
+    }
+
+    [Fact]
+    public async Task Released_reservation_returns_the_quantity()
     {
         var accountId = Guid.CreateVersion7();
         var orderId = Guid.CreateVersion7();
-        await _rabbit.WaitForQueueAsync("trade-simulator.portfolio.order.events");
+        await DepositAsync(accountId, "PETR4", 100);
+        await ReserveAsync(accountId, orderId, 40);
 
-        await PublishOrderSubmittedAsync(orderId, accountId, 10);
+        var released = await _client.DeleteAsync($"/api/order-reservations/{orderId}");
 
-        var reply = await _rabbit.NextAsync(m => m.RoutingKey == "assets.block.failed");
-        Assert.Contains(orderId.ToString(), reply.Body);
+        Assert.Equal(HttpStatusCode.NoContent, released.StatusCode);
+        var asset = await GetAssetAsync(accountId, "PETR4", available: 100);
+        Assert.Equal(100, asset.GetProperty("available").GetInt64());
     }
+
+    private Task<HttpResponseMessage> ReserveAsync(Guid accountId, Guid orderId, long quantity) =>
+        _client.PostAsJsonAsync("/api/order-reservations", new { orderId, accountId, ticker = "PETR4", quantity });
 
     private async Task DepositAsync(Guid accountId, string ticker, long quantity)
     {
@@ -95,14 +123,23 @@ public sealed class PortfolioIntegrationTests(InfrastructureFixture infrastructu
         Assert.Fail("Deposit was not applied within 20s.");
     }
 
-    private Task PublishOrderSubmittedAsync(Guid orderId, Guid accountId, long quantity) =>
-        _rabbit.PublishAsync("trade-simulator-order-commands", "OrderSubmitted", JsonSerializer.Serialize(new
+    // The read model is eventually consistent: polls until the asset shows the expected available quantity.
+    private async Task<JsonElement> GetAssetAsync(Guid accountId, string ticker, long? available = null)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
         {
-            id = Guid.CreateVersion7(),
-            eventType = "OrderSubmitted",
-            @event = new { orderId, accountId, ticker = "PETR4", side = "Sell", quantity }
-        }));
+            var response = await _client.GetAsync($"/api/assets/{ticker}?accountId={accountId}");
+            if (response.IsSuccessStatusCode)
+            {
+                var asset = await response.Content.ReadFromJsonAsync<JsonElement>();
+                if (available is null || asset.GetProperty("available").GetInt64() == available || DateTime.UtcNow > deadline)
+                    return asset;
+            }
+            else if (DateTime.UtcNow > deadline)
+                return await _client.GetFromJsonAsync<JsonElement>($"/api/assets/{ticker}?accountId={accountId}");
 
-    private async Task<JsonElement> GetAssetAsync(Guid accountId, string ticker) =>
-        await _client.GetFromJsonAsync<JsonElement>($"/api/assets/{ticker}?accountId={accountId}");
+            await Task.Delay(100);
+        }
+    }
 }

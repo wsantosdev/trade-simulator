@@ -1,14 +1,13 @@
 using Moonad;
+using TradeSimulator.EventSourcing;
 using TradeSimulator.Portfolio.Domain.Events;
 using TradeSimulator.Portfolio.Domain.ValueObjects;
 
 namespace TradeSimulator.Portfolio.Domain.Entities;
 
-public sealed class Asset
+public sealed class Asset : EventSourcedEntity
 {
     public const long MaxOperationQuantity = 1_000_000;
-
-    private readonly List<AssetEvent> _uncommitted = [];
 
     private Asset(AssetDeposited opened) : this(opened.AssetId, opened.AccountId, opened.Ticker)
     {
@@ -26,8 +25,6 @@ public sealed class Asset
     public Ticker Ticker { get; }
     public Quantity Available { get; private set; }
     public Quantity Blocked { get; private set; }
-    public int Version { get; private set; }
-    public IReadOnlyList<AssetEvent> UncommittedEvents => _uncommitted;
 
     public Quantity Total => Available.Add(Blocked);
 
@@ -41,8 +38,7 @@ public sealed class Asset
 
         var deposited = new AssetDeposited(id, accountId, ticker, quantity, now);
         var asset = new Asset(deposited);
-        asset.Apply(deposited);
-        asset._uncommitted.Add(deposited);
+        asset.RaiseEvent(deposited);
         return asset;
     }
 
@@ -56,7 +52,7 @@ public sealed class Asset
         {
             if (@event.AssetId != asset.Id)
                 return new CorruptAssetHistory();
-            asset.Apply(@event);
+            asset.ReplayEvent(@event);
         }
 
         return asset;
@@ -78,15 +74,13 @@ public sealed class Asset
         {
             if (@event.AssetId != asset.Id)
                 return new CorruptAssetHistory();
-            asset.Apply(@event);
+            asset.ReplayEvent(@event);
         }
 
         return asset;
     }
 
     public AssetSnapshot ToSnapshot() => new(Id, AccountId, Ticker, Available.Value, Blocked.Value, Version);
-
-    public void MarkCommitted() => _uncommitted.Clear();
 
     public Result<Asset, IPortfolioError> Deposit(Quantity quantity, DateTimeOffset now)
     {
@@ -139,14 +133,13 @@ public sealed class Asset
 
     private Result<Asset, IPortfolioError> Raise(AssetEvent @event)
     {
-        Apply(@event);
-        _uncommitted.Add(@event);
+        RaiseEvent(@event);
         return this;
     }
 
-    private void Apply(AssetEvent @event)
+    protected override void ProcessEvent(IEvent domainEvent)
     {
-        switch (@event)
+        switch (domainEvent)
         {
             case AssetDeposited deposited:
                 Available = Available.Add(deposited.Quantity);
@@ -163,7 +156,5 @@ public sealed class Asset
                 Available = Available.Add(unblocked.Quantity);
                 break;
         }
-
-        Version++;
     }
 }

@@ -12,13 +12,13 @@ Cada módulo é um microsserviço .NET 10 independente, com seu próprio projeto
 | --- | --- | --- |
 | **Account** | 8080 | Conta corrente: abertura, depósitos, saques, reserva (provisionamento) de saldo para ordens de compra e débito/liberação conforme as execuções. |
 | **Orders** | 8081 | Ciclo de vida das ordens (envio, cancelamento, substituição, execução parcial e total) e seu histórico. |
-| **Portfolio** | 8082 | Carteira de ativos por conta: posição disponível e bloqueada (ordens de venda). Usa Redis para idempotência. |
+| **Portfolio** | 8082 | Carteira de ativos por conta: posição disponível e bloqueada (ordens de venda). Usa Redis para idempotência e MongoDB para o read model. |
 | **Exchange** | 8083 | A bolsa. Livro de ofertas com casamento de ordens, cadastro de instrumentos, histórico de cotações e simulação de pregão. Serviço externo: **não conhece nenhum outro módulo**. |
 | **Quotes** | 8084 | Cotações em tempo real, via SignalR. |
 | **OfferBook** | 8085 | Livro de ofertas em tempo real, via SignalR. |
 | **UI** | 4200 / 4201 / 4204 | Angular. App principal em `4200` (conta, ordens, carteira, cotações, livro); home broker com janelas flutuantes em `4201`; UI da bolsa em `4204`. |
 
-`Shared/TradeSimulator.Commons` contém apenas o que é comum aos serviços na comunicação: `EventEnvelope<T>` e conversores JSON.
+`Shared/TradeSimulator.Commons` contém apenas o que é comum aos serviços na comunicação: `EventEnvelope<T>` e conversores JSON. `Shared/TradeSimulator.EventSourcing` contém `IEvent`, `EventStore` (serialização + append/leitura na tabela `events`, tipos descobertos por assembly) e `EventSourcedEntity` (base dos agregados Account, Order e Asset).
 
 ## Como funciona
 
@@ -26,21 +26,30 @@ Cada módulo é um microsserviço .NET 10 independente, com seu próprio projeto
 2. Ao enviar uma ordem, **Orders** a registra como pendente e publica um comando de reserva: de **fundos** em Account (compra) ou de **ativos** em Portfolio (venda).
 3. Account/Portfolio respondem com sucesso ou falha. Em caso de falha a ordem é rejeitada; em caso de sucesso, Orders a despacha para a **Exchange**.
 4. A **Exchange** casa as ordens no livro e publica eventos (aceita, parcialmente executada, executada, cancelada, substituída, rejeitada). Rejeições trazem o motivo (`reason`, ex.: `NoQuote`, `InvalidOrder`), exibido no histórico da ordem.
-   - **Agendamento (módulo Orders):** com o mercado fechado (fora de 10:00–18:00, Brasília), após a reserva de fundos/ativos a ordem vai para **ScheduledDispatching** (*Agendada*) e **não é enviada à Exchange**, que desconhece o conceito. Os bloqueios permanecem; ao abrir a sessão o Orders a despacha (→ `PendingNew`, fluxo normal). Cancelar uma ordem agendada é local (`OrderScheduleCancelled`) e libera os bloqueios em Account/Portfolio. As ordens ficam persistidas no event store do Orders (sobrevivem a reinícios).
+   - **Agendamento (módulo Orders):** com o mercado fechado (não ocorre: a bolsa opera 24/7), após a reserva de fundos/ativos a ordem vai para **ScheduledDispatching** (*Agendada*) e **não é enviada à Exchange**, que desconhece o conceito. Os bloqueios permanecem; ao abrir a sessão o Orders a despacha (→ `PendingNew`, fluxo normal). Cancelar uma ordem agendada é local (`OrderScheduleCancelled`) e libera os bloqueios em Account/Portfolio. As ordens ficam persistidas no event store do Orders (sobrevivem a reinícios).
 5. **Orders** aplica os eventos ao estado da ordem; **Account** debita/libera saldo e **Portfolio** movimenta ativos a partir desses mesmos eventos.
 6. A Exchange publica cotações e livro de ofertas só para tickers com interesse registrado; **Quotes** e **OfferBook** renovam periodicamente esse interesse (heartbeat) enquanto houver clientes conectados e retransmitem as atualizações por SignalR para a UI.
 
 A comunicação entre serviços é assíncrona, por RabbitMQ.
 
+## Validação síncrona de ordens
+
+`POST /api/orders` valida e reserva antes de responder. Orders grava a ordem e chama por HTTP:
+
+- **Compra** → Account `POST /api/order-reservations`. Um *gate* em Redis (script Lua, single-threaded e atômico) confere e reserva o saldo; o Postgres continua sendo a fonte de verdade.
+- **Venda** → Portfolio `POST /api/order-reservations`. A posição é bloqueada com lock otimista (versão do stream do ativo + retry em conflito).
+
+Sem saldo/posição a resposta é `422` com `reason` e a ordem fica `Rejected`; serviço indisponível retorna `503`. Se o despacho falhar, a reserva é liberada (`DELETE /api/order-reservations/{orderId}`). A reserva é idempotente por `orderId`.
+
 ## Padrões e técnicas
 
 As regras completas estão em [`PATTERNS.md`](PATTERNS.md) (e as de interface em [`UI.md`](UI.md)). Em resumo:
 
-- **Microsserviços por módulo de negócio**, com banco lógico próprio: um único PostgreSQL, mas um schema e um usuário por módulo, sem acesso cruzado.
+- **Microsserviços por módulo de negócio**, com banco lógico próprio: um único PostgreSQL, mas um schema por módulo (um único usuário com acesso a todos), sem acesso cruzado no código.
 - **Ports & Adapters (Hexagonal)** estrito: o domínio e os handlers não conhecem ASP.NET, Npgsql, RabbitMQ, SignalR nem JSON. Adaptadores de entrada (endpoints HTTP, consumidores de mensagens) chamam portas de entrada; adaptadores de saída em `Infrastructure/` implementam as portas de saída.
 - **Vertical Slices**: cada caso de uso (comando ou consulta) vive em `Features/<CasoDeUso>/`, com tudo de que precisa (o lado API). As reações a mensagens de outros módulos ficam em `Processors/<CasoDeUso>/` (o lado worker), também uma pasta por caso de uso. Portas e tipos usados pelos dois lados ficam em `Common/`.
 - **Domain-Driven Design**: agregados como fronteira transacional, objetos de valor com ids fortemente tipados e criação validada (`TryCreate`), eventos de domínio.
-- **Event Sourcing** (Account, Orders, Portfolio): o estado é reconstruído a partir dos eventos, com snapshots; **CQRS** com read models para consultas.
+- **Event Sourcing** (Account, Orders, Portfolio): o estado é reconstruído a partir dos eventos, com snapshots; **CQRS** com read models em **MongoDB**, alimentados por *handlers* acionados pelos eventos do outbox (sem polling do stream) (as event stores não têm métodos de read model; ver `PATTERNS.md`).
 - **Transactional Outbox**: eventos e respostas são gravados na mesma transação do estado e publicados por um serviço em segundo plano, garantindo entrega *at-least-once*.
 - **Idempotência e concorrência otimista**: repetição de mensagens é tolerada (chave no Redis no Portfolio) e conflitos de versão são reprocessados.
 - **Railway-oriented programming**: erros esperados são valores (`Result<T, TError>`, biblioteca Moonad), não exceções; cada módulo tem seu catálogo de erros e o mapeamento para HTTP fica na infraestrutura.
@@ -77,7 +86,7 @@ Na raiz do repositório:
 docker compose up --build
 ```
 
-Isso inicia PostgreSQL, Redis, RabbitMQ, os seis serviços e a UI. Os schemas e usuários do PostgreSQL são criados por `database/init-schemas.sql` e as tabelas são criadas pelos próprios serviços na inicialização.
+Isso inicia PostgreSQL, MongoDB, Redis, RabbitMQ, os seis serviços e a UI. O usuário (`tradesimulator`) e os schemas do PostgreSQL são criados por `database/init-schemas.sql` e as tabelas são criadas pelos próprios serviços na inicialização.
 
 | Serviço | URL |
 | --- | --- |
@@ -101,7 +110,7 @@ A Exchange precisa de instrumentos e cotações históricas da B3. Os arquivos n
 
 Para executar a importação contra o PostgreSQL do Docker, use a string de conexão do Exchange (`ConnectionStrings__Exchange`) apontando para `localhost:5432`.
 
-Para simular o pregão fora do horário de mercado, defina `EXCHANGE_SESSION_CLOCK_OFFSET` (ex.: `EXCHANGE_SESSION_CLOCK_OFFSET=-06:00:00 docker compose up`) para deslocar o relógio da sessão.
+A bolsa opera 24/7. `EXCHANGE_SESSION_CLOCK_OFFSET` (ex.: `-06:00:00`) ainda desloca o relógio da simulação da Exchange.
 
 ### UI em modo de desenvolvimento
 

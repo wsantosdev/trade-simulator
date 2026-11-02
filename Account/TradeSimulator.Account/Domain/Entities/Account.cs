@@ -1,13 +1,13 @@
 using Moonad;
+using TradeSimulator.EventSourcing;
 using TradeSimulator.Account.Domain.Events;
 using TradeSimulator.Account.Domain.ValueObjects;
 
 namespace TradeSimulator.Account.Domain.Entities;
 
-public sealed class Account
+public sealed class Account : EventSourcedEntity
 {
     private const decimal MaximumPersistedBalance = 9_999_999_999_999_999.99m;
-    private readonly List<AccountEvent> _uncommittedEvents = [];
     private bool _isOpened;
 
     private Account(AccountId id) => Id = id;
@@ -15,7 +15,6 @@ public sealed class Account
     public AccountId Id { get; }
     public decimal AvailableBalance { get; private set; }
     public decimal ProvisionedBalance { get; private set; }
-    public IReadOnlyList<AccountEvent> UncommittedEvents => _uncommittedEvents;
 
     public static Result<Account, IAccountError> Open(AccountId id)
     {
@@ -53,7 +52,7 @@ public sealed class Account
             return Result<Account, IAccountError>.Error(new InvalidAccountId());
         if (snapshot.AccountId != id)
             return Result<Account, IAccountError>.Error(new SnapshotAccountMismatch());
-        if (snapshot.AvailableBalance < 0 || snapshot.ProvisionedBalance < 0 ||
+        if (snapshot.Version <= 0 || snapshot.AvailableBalance < 0 || snapshot.ProvisionedBalance < 0 ||
             snapshot.AvailableBalance > MaximumPersistedBalance || snapshot.ProvisionedBalance > MaximumPersistedBalance)
             return Result<Account, IAccountError>.Error(new InvalidSnapshotBalance());
 
@@ -61,6 +60,7 @@ public sealed class Account
         {
             AvailableBalance = snapshot.AvailableBalance,
             ProvisionedBalance = snapshot.ProvisionedBalance,
+            Version = snapshot.Version,
             _isOpened = true
         };
         foreach (var @event in events)
@@ -75,7 +75,7 @@ public sealed class Account
 
     public Result<AccountSnapshot, IAccountError> CreateSnapshot() =>
         _isOpened
-            ? new AccountSnapshot(Id, AvailableBalance, ProvisionedBalance)
+            ? new AccountSnapshot(Id, Version, AvailableBalance, ProvisionedBalance)
             : Result<AccountSnapshot, IAccountError>.Error(new AccountOpeningEventMissing());
 
     public Result<Account, IAccountError> Deposit(decimal amount)
@@ -130,6 +130,12 @@ public sealed class Account
             return Result<Account, IAccountError>.Error(new DebitExceedsProvisionedBalance());
 
         return Raise(new FundsDebited(Id, amount, DateTimeOffset.UtcNow, orderId));
+    }
+
+    protected override void ProcessEvent(IEvent domainEvent)
+    {
+        if (Apply((AccountEvent)domainEvent).IsError)
+            throw new InvalidOperationException($"Event {domainEvent.GetType().Name} is not valid for this account.");
     }
 
     public Result<Account, IAccountError> Apply(AccountEvent @event)
@@ -194,10 +200,9 @@ public sealed class Account
         if (AvailableBalance < 0 || ProvisionedBalance < 0)
             return Result<Account, IAccountError>.Error(new NegativeAccountBalance());
 
+        Advance();
         return this;
     }
-
-    public void MarkCommitted() => _uncommittedEvents.Clear();
 
     private Result<Account, IAccountError> Raise(AccountEvent @event)
     {
@@ -205,7 +210,7 @@ public sealed class Account
         if (applied.IsError)
             return applied;
 
-        _uncommittedEvents.Add(@event);
+        Record(@event);
         return this;
     }
 }

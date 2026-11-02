@@ -9,12 +9,14 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10"/>
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
         <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
+        <PackageReference Include="MongoDB.Driver" Version="3.13.0" />
         <ProjectReference Include="..\..\Shared\TradeSimulator.Commons\TradeSimulator.Commons.csproj" />
+        <ProjectReference Include="..\..\Shared\TradeSimulator.EventSourcing\TradeSimulator.EventSourcing.csproj" />
         <Using Include="TradeSimulator.Commons" />
         <PackageReference Include="Moonad" Version="5.5.1" />
-        <PackageReference Include="Npgsql" Version="10.0.0" />
+        <PackageReference Include="Npgsql" Version="10.0.3" />
         <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
     </ItemGroup>
 

@@ -50,7 +50,7 @@
 ## Estados da ordem
 
 - Estados: **PendingDispatching** (Despacho pendente), **PendingNew** (Pendente), **New** (Nova), **Parcialmente executada**, **Executada**, **Cancelada** e **Rejeitada**.
-- Agendamento: com o mercado fechado (10:00–18:00 Brasília; deslocável por `Simulation:SessionClockOffset`, igual ao da Exchange) a ordem, após a reserva de fundos/ativos, vai de **PendingDispatching** para **ScheduledDispatching** (*Agendada*) via **OrderScheduled** (não publicado). A Exchange não conhece agendamento e nunca recebe a ordem nesse estado. Um serviço em segundo plano despacha as agendadas ao abrir o mercado (→ **PendingNew**, fluxo normal). Cancelar uma ordem agendada é local: **OrderScheduleCancelled** (publicado; Account e Portfolio o consomem para liberar os bloqueios) leva a **Cancelled**. Substituição não é permitida enquanto agendada.
+- Agendamento: com o mercado fechado (a bolsa opera 24/7, então `IMarketHours.IsOpen()` é sempre verdadeiro) a ordem, após a reserva de fundos/ativos, vai de **PendingDispatching** para **ScheduledDispatching** (*Agendada*) via **OrderScheduled** (não publicado). A Exchange não conhece agendamento e nunca recebe a ordem nesse estado. Um serviço em segundo plano despacha as agendadas ao abrir o mercado (→ **PendingNew**, fluxo normal). Cancelar uma ordem agendada é local: **OrderScheduleCancelled** (publicado; Account e Portfolio o consomem para liberar os bloqueios) leva a **Cancelled**. Substituição não é permitida enquanto agendada.
 - Vocabulário: **Submitted = ação do cliente; Dispatched = ação do sistema.** Toda ordem nasce com o evento **OrderSubmitted** em **PendingDispatching** (Despacho pendente); só após a validação interna (Conta/Portfólio) o sistema grava **OrderDispatched** e ela passa a **PendingNew**; vira **New** somente ao receber o *ack* do Exchange.
 - Também existem os estados transitórios **PendingCancel** e **PendingReplace**.
 - Novos estados poderão ser adicionados no futuro.
@@ -260,7 +260,7 @@ Nenhuma no momento.
 
 
 ## Progresso — Passo 4 (read model, consultas, cancelar/replace, SignalR)
-- Read model CQRS `order_read_model` (Postgres), projetado na mesma transação do append de eventos. Consolida estado, quantidade executada acumulada, restante, preço médio, último preço, timestamp do último negócio e `last_action_at`.
+- Read model CQRS na coleção `orders` do **MongoDB**, alimentado pelo `OrderProjectionHandler` (acionado por cada evento do outbox via fila `trade-simulator.orders.read-model`; recarrega o agregado por id; eventualmente consistente; ordens recusadas pela validação interna nunca entram). Consolida estado, quantidade executada acumulada, restante, preço médio, último preço, timestamp do último negócio e `last_action_at`.
 - `GET /api/orders?accountId=...` (obrigatório): filtros `ticker`, `state`, `side`, `type`; `sortBy` (qualquer campo da lista) e `sortDirection` (asc/desc); página fixa de 10 (`page`); `updatedSince` retorna apenas ordens com `lastActionAt` posterior (reconexão).
 - `GET /api/orders/{id}/history?accountId=...`: histórico de eventos da ordem (404 se a conta não for a dona).
 - `POST /api/orders/{id}/cancel` `{accountId}` e `POST /api/orders/{id}/replace` `{accountId, price}` → 202 (PendingCancel/PendingReplace), 404/409/422. A quantidade do replace é sempre a restante, por isso não é enviada.

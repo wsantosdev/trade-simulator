@@ -127,13 +127,8 @@ public sealed class OrderBookEngineTests
     }
 
     [Fact]
-    public async Task Rejections_outside_session_without_history_and_invalid_command()
+    public async Task Rejections_without_history_and_invalid_command()
     {
-        var closed = new Harness(Day.AddHours(19));
-        var a = OrderId.New();
-        await closed.Send(new SubmitOrder(a, Petr, OrderSide.Buy, OrderType.Limit, Q(100), P(30m)));
-        Assert.IsType<OrderRejected>(Assert.Single(closed.EventsOf(a)));
-
         var open = new Harness(OpenTime);
         var b = OrderId.New();
         await open.Send(new SubmitOrder(b, Vale, OrderSide.Buy, OrderType.Limit, Q(100), P(30m)));
@@ -181,30 +176,6 @@ public sealed class OrderBookEngineTests
         var refilled = await h.Snapshot(Petr);
         Assert.Equal(10, refilled.Asks.Count);
         Assert.Equal(10, refilled.Bids.Count);
-    }
-
-    [Fact]
-    public async Task Closed_book_is_frozen_and_heartbeats_with_consecutive_sequence()
-    {
-        var h = new Harness(Day.AddHours(19));
-        h.Interest.Renew([Petr]);
-        await h.Cycle();
-        var frozen = await h.Snapshot(Petr);
-        h.OfferBook.Snapshots.Clear();
-
-        // The first cycle is silent: the snapshot just published already counts as activity for that second.
-        for (var i = 0; i < 4; i++)
-        {
-            h.Clock.Advance(TimeSpan.FromSeconds(1));
-            h.Interest.Renew([Petr]);
-            await h.Cycle();
-        }
-
-        Assert.Equal(3, h.OfferBook.Deltas.Count);
-        Assert.All(h.OfferBook.Deltas, d => Assert.Empty(d.Changes));
-        Assert.Equal(h.OfferBook.Deltas.Select(d => d.Sequence - 1), h.OfferBook.Deltas.Select(d => d.PreviousSequence));
-        Assert.Equal(frozen.Bids, (await h.Snapshot(Petr)).Bids);
-        Assert.Equal(frozen.Asks, (await h.Snapshot(Petr)).Asks);
     }
 
     [Fact]

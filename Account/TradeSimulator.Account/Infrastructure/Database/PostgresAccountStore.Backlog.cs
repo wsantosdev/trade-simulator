@@ -7,7 +7,7 @@ public sealed partial class PostgresAccountStore
 {
     private const string BacklogSql = """
         SELECT 'events', COUNT(*), COALESCE(EXTRACT(EPOCH FROM now() - MIN(e.occurred_at)), 0)
-        FROM event_outbox o JOIN account_events e ON e.position = o.position
+        FROM event_outbox o JOIN events e ON e.id = o.position
         WHERE o.published_at IS NULL
         UNION ALL
         SELECT 'responses', COUNT(*), COALESCE(EXTRACT(EPOCH FROM now() - MIN(created_at)), 0)

@@ -9,23 +9,18 @@ public enum SessionPhase : byte
 
 public readonly record struct SessionPosition(SessionPhase Phase, DateOnly Date, int Step);
 
-// Simulated B3 session: 10:00-18:00 in Brasilia time (UTC-3, no daylight saving), one step per second.
+// The exchange runs 24/7: the session is always open. A simulated day is the Brasilia calendar day
+// (UTC-3, no daylight saving), from 00:00 to 24:00, one step per second.
 public static class TradingSession
 {
     public static readonly TimeSpan Offset = TimeSpan.FromHours(-3);
-    public static readonly TimeSpan OpeningTime = TimeSpan.FromHours(10);
-    public const int Steps = 8 * 60 * 60;
+    public const int Steps = 24 * 60 * 60;
 
     public static SessionPosition At(DateTimeOffset now)
     {
         var local = now.ToOffset(Offset);
         var date = DateOnly.FromDateTime(local.DateTime);
-        var seconds = (int)Math.Floor((local.TimeOfDay - OpeningTime).TotalSeconds);
-        return seconds switch
-        {
-            < 0 => new SessionPosition(SessionPhase.PreOpen, date, 0),
-            >= Steps => new SessionPosition(SessionPhase.Closed, date, Steps),
-            _ => new SessionPosition(SessionPhase.Open, date, seconds)
-        };
+        var seconds = Math.Min((int)Math.Floor(local.TimeOfDay.TotalSeconds), Steps - 1);
+        return new SessionPosition(SessionPhase.Open, date, seconds);
     }
 }

@@ -192,7 +192,7 @@ public sealed class AssetTests
         asset.Withdraw(Qty(10), Now);
         asset.Unblock(Qty(5), Now);
 
-        var restored = Asset.Rehydrate(asset.UncommittedEvents.ToList()).ResultValue;
+        var restored = Asset.Rehydrate(asset.UncommittedEvents.Cast<AssetEvent>().ToList()).ResultValue;
 
         Assert.Equal(asset.Id, restored.Id);
         Assert.Equal(asset.AccountId, restored.AccountId);
@@ -210,7 +210,7 @@ public sealed class AssetTests
         asset.Block(Qty(10), Now);
 
         Assert.IsType<AssetOpeningEventMissing>(Asset.Rehydrate([]).ErrorValue);
-        Assert.IsType<AssetOpeningEventMissing>(Asset.Rehydrate([asset.UncommittedEvents[1]]).ErrorValue);
+        Assert.IsType<AssetOpeningEventMissing>(Asset.Rehydrate([(AssetEvent)asset.UncommittedEvents[1]]).ErrorValue);
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public sealed class AssetTests
         var first = Open(100);
         var other = Open(100);
 
-        Assert.IsType<CorruptAssetHistory>(Asset.Rehydrate([first.UncommittedEvents[0], other.UncommittedEvents[0]]).ErrorValue);
+        Assert.IsType<CorruptAssetHistory>(Asset.Rehydrate([(AssetEvent)first.UncommittedEvents[0], (AssetEvent)other.UncommittedEvents[0]]).ErrorValue);
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public sealed class AssetTests
         var snapshot = asset.ToSnapshot();
         asset.Withdraw(Qty(10), Now);
         asset.Deposit(Qty(5), Now);
-        var later = asset.UncommittedEvents.Skip(snapshot.Version).ToList();
+        var later = asset.UncommittedEvents.Skip(snapshot.Version).Cast<AssetEvent>().ToList();
 
         var restored = Asset.Restore(snapshot, later).ResultValue;
 
@@ -248,15 +248,15 @@ public sealed class AssetTests
         var snapshot = asset.ToSnapshot();
 
         Assert.IsType<CorruptAssetHistory>(Asset.Restore(snapshot with { Available = -1 }, []).ErrorValue);
-        Assert.IsType<CorruptAssetHistory>(Asset.Restore(snapshot, [other.UncommittedEvents[0]]).ErrorValue);
+        Assert.IsType<CorruptAssetHistory>(Asset.Restore(snapshot, [(AssetEvent)other.UncommittedEvents[0]]).ErrorValue);
     }
 
     [Fact]
-    public void MarkCommitted_clears_uncommitted_events()
+    public void CommitEvents_clears_uncommitted_events()
     {
         var asset = Open(100);
 
-        asset.MarkCommitted();
+        asset.CommitEvents();
 
         Assert.Empty(asset.UncommittedEvents);
     }

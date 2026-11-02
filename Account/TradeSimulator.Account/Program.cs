@@ -1,6 +1,9 @@
 using TradeSimulator.Commons.Messaging;
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
+using StackExchange.Redis;
+using TradeSimulator.Account.Features.SubmitReservation;
+using TradeSimulator.Account.Infrastructure.Redis;
 using TradeSimulator.Account.Common;
 using TradeSimulator.Account.Features.Shared;
 using TradeSimulator.Account.Processors.OrderFunds;
@@ -18,22 +21,33 @@ using TradeSimulator.Commons.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Accounts");
+var redisConnection = builder.Configuration.GetConnectionString("Redis");
 builder.Services.AddOpenApi();
 builder.Services.AddGracefulShutdown();
 builder.Services.AddTradeSimulatorTelemetry(builder.Configuration, AccountTelemetry.Service);
 builder.Services.AddHealthChecks()
     .AddProbe("postgres", (sp, ct) => sp.GetRequiredService<PostgresAccountStore>().PingAsync(ct))
+    .AddProbe("redis", async (sp, _) => await sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase().PingAsync())
     .AddRabbitMqProbe();
 builder.Services.AddOutboxBacklogMonitor<PostgresAccountStore>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:4200").AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+    ConnectionMultiplexer.Connect(new ConfigurationOptions
+    {
+        EndPoints = { redisConnection ?? "localhost:6379" },
+        AbortOnConnectFail = false
+    }));
+builder.Services.AddSingleton<IFundsGate, RedisFundsGate>();
 builder.Services.AddSingleton(sp =>
 {
     return new PostgresAccountStore(
         connectionString ?? string.Empty,
-        sp.GetRequiredService<ILogger<PostgresAccountStore>>());
+        sp.GetRequiredService<ILogger<PostgresAccountStore>>(),
+        sp.GetRequiredService<IFundsGate>());
 });
-builder.Services.AddSingleton<IAccountStore>(sp => sp.GetRequiredService<PostgresAccountStore>());
+builder.Services.AddSingleton<IAccountStore>(sp =>
+    new InvalidatingAccountStore(sp.GetRequiredService<PostgresAccountStore>(), sp.GetRequiredService<IFundsGate>()));
 builder.Services.AddSingleton<IAccountMetrics, AccountMetrics>();
 builder.Services.AddSingleton<IDeposit, DepositHandler>();
 builder.Services.AddSingleton<IWithdrawFunds, WithdrawFundsHandler>();
@@ -53,7 +67,7 @@ builder.Services.AddHttpClient<IOfferBookClient, HttpOfferBookClient>(client =>
 builder.Services.AddSingleton<OrderFundsProcessor>();
 builder.Services.AddSingleton<IResponsePublisher, RabbitMqResponsePublisher>();
 builder.Services.AddHostedService<ResponseOutboxPublisherService>();
-builder.Services.AddHostedService<OrderSubmittedConsumer>();
+builder.Services.AddHostedService<OrderScheduleCancelledConsumer>();
 builder.Services.AddHostedService<ExchangeEventConsumer>();
 
 var app = builder.Build();
@@ -102,6 +116,7 @@ app.MapGetAccountEndpoint();
 app.MapDepositEndpoint();
 app.MapWithdrawEndpoint();
 app.MapReserveFundsEndpoint();
+app.MapOrderReservationEndpoints();
 app.Run();
 
 public partial class Program { }

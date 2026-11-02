@@ -18,6 +18,7 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
         _factory = new ModuleFactory<Program>(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Accounts"] = await infrastructure.CreateDatabaseAsync(),
+            ["ConnectionStrings:Redis"] = infrastructure.RedisConnection,
             ["RabbitMq:Uri"] = infrastructure.RabbitMqUri
         });
         _rabbit = await RabbitMqProbe.ConnectAsync(infrastructure.RabbitMqUri);
@@ -51,22 +52,13 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
     }
 
     [Fact]
-    public async Task Order_submitted_message_reserves_funds_and_replies_through_rabbitmq()
+    public async Task Order_reservation_reserves_funds_synchronously()
     {
         var accountId = await OpenAccountAsync();
         await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
-        var orderId = Guid.CreateVersion7();
-        await _rabbit.WaitForQueueAsync("trade-simulator.account.order.submitted");
 
-        await _rabbit.PublishAsync("trade-simulator-order-commands", "OrderSubmitted", JsonSerializer.Serialize(new
-        {
-            id = Guid.CreateVersion7(),
-            eventType = "OrderSubmitted",
-            @event = new { orderId, accountId, ticker = "PETR4", side = "Buy", type = "Limit", quantity = 10, price = 20m }
-        }));
-
-        var reply = await _rabbit.NextAsync(m => m.RoutingKey == "funds.reserved");
-        Assert.Contains(orderId.ToString(), reply.Body);
+        var response = await ReserveAsync(accountId, Guid.CreateVersion7());
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
         Assert.Equal(200m, account.GetProperty("provisionedBalance").GetDecimal());
@@ -74,22 +66,56 @@ public sealed class AccountIntegrationTests(InfrastructureFixture infrastructure
     }
 
     [Fact]
-    public async Task Order_submitted_without_enough_balance_is_rejected_through_rabbitmq()
+    public async Task Order_reservation_without_enough_balance_is_rejected_with_422()
     {
         var accountId = await OpenAccountAsync();
-        var orderId = Guid.CreateVersion7();
-        await _rabbit.WaitForQueueAsync("trade-simulator.account.order.submitted");
 
-        await _rabbit.PublishAsync("trade-simulator-order-commands", "OrderSubmitted", JsonSerializer.Serialize(new
-        {
-            id = Guid.CreateVersion7(),
-            eventType = "OrderSubmitted",
-            @event = new { orderId, accountId, ticker = "PETR4", side = "Buy", type = "Limit", quantity = 10, price = 20m }
-        }));
+        var response = await ReserveAsync(accountId, Guid.CreateVersion7());
 
-        var reply = await _rabbit.NextAsync(m => m.RoutingKey == "funds.reservation.failed");
-        Assert.Contains(orderId.ToString(), reply.Body);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("InsufficientFunds", body.GetProperty("reason").GetString());
     }
+
+    [Fact]
+    public async Task Concurrent_order_reservations_never_exceed_the_balance()
+    {
+        var accountId = await OpenAccountAsync();
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => ReserveAsync(accountId, Guid.CreateVersion7())));
+
+        Assert.Equal(5, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+        var account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
+        Assert.Equal(0m, account.GetProperty("availableBalance").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Released_reservation_returns_the_funds()
+    {
+        var accountId = await OpenAccountAsync();
+        await _client.PostAsJsonAsync($"/api/accounts/{accountId}/deposits", new { amount = 1_000m });
+        var orderId = Guid.CreateVersion7();
+        await ReserveAsync(accountId, orderId);
+
+        var released = await _client.DeleteAsync($"/api/order-reservations/{orderId}");
+        Assert.Equal(HttpStatusCode.NoContent, released.StatusCode);
+
+        var account = await _client.GetFromJsonAsync<JsonElement>($"/api/accounts/{accountId}");
+        Assert.Equal(1_000m, account.GetProperty("availableBalance").GetDecimal());
+    }
+
+    private Task<HttpResponseMessage> ReserveAsync(Guid accountId, Guid orderId) =>
+        _client.PostAsJsonAsync("/api/order-reservations", new
+        {
+            orderId,
+            accountId,
+            ticker = "PETR4",
+            side = "Buy",
+            type = "Limit",
+            quantity = 10,
+            price = 20m
+        });
 
     private async Task<Guid> OpenAccountAsync()
     {

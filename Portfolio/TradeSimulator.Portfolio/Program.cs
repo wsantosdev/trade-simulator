@@ -4,7 +4,10 @@ using Npgsql;
 using StackExchange.Redis;
 using TradeSimulator.Commons.Telemetry;
 using TradeSimulator.Portfolio.Common;
+using MongoDB.Driver;
 using TradeSimulator.Portfolio.Features.GetAsset;
+using TradeSimulator.Portfolio.Infrastructure.ReadModel;
+using TradeSimulator.Portfolio.Features.ReserveSellOrder;
 using TradeSimulator.Portfolio.Features.SearchAssets;
 using TradeSimulator.Portfolio.Infrastructure.Database;
 using TradeSimulator.Portfolio.Infrastructure.Idempotency;
@@ -52,9 +55,16 @@ builder.Services.AddSingleton<PostgresAssetStore>();
 builder.Services.AddSingleton<IAssetStore>(sp => sp.GetRequiredService<PostgresAssetStore>());
 builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresAssetStore>());
 builder.Services.AddOutboxBacklogMonitor<PostgresAssetStore>();
-builder.Services.AddSingleton<PostgresAssetQueries>();
-builder.Services.AddSingleton<IAssetSearch>(sp => sp.GetRequiredService<PostgresAssetQueries>());
-builder.Services.AddSingleton<IAssetLookup>(sp => sp.GetRequiredService<PostgresAssetQueries>());
+MongoSetup.Initialize();
+builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(
+    builder.Configuration.GetConnectionString("Mongo") ?? "mongodb://localhost:27017"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoClient>()
+    .GetDatabase(builder.Configuration["Mongo:Database"] ?? "portfolio"));
+builder.Services.AddSingleton<MongoAssetReadModel>();
+builder.Services.AddSingleton<IAssetSearch>(sp => sp.GetRequiredService<MongoAssetReadModel>());
+builder.Services.AddSingleton<IAssetLookup>(sp => sp.GetRequiredService<MongoAssetReadModel>());
+builder.Services.AddSingleton<AssetProjectionHandler>();
+builder.Services.AddHostedService<AssetProjectionConsumer>();
 builder.Services.AddSingleton<ISearchAssets, SearchAssetsHandler>();
 builder.Services.AddSingleton<IGetAsset, GetAssetHandler>();
 builder.Services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
@@ -115,6 +125,7 @@ if (app.Environment.IsDevelopment())
 app.MapTradeSimulatorHealth();
 app.MapSearchAssetsEndpoint();
 app.MapGetAssetEndpoint();
+app.MapOrderReservationEndpoints();
 app.MapHub<PortfolioHub>(PortfolioHub.Route);
 app.Run();
 

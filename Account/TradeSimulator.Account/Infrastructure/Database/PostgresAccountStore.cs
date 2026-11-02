@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Moonad;
 using Npgsql;
+using TradeSimulator.EventSourcing;
 using TradeSimulator.Account.Features.Shared;
 using TradeSimulator.Account.Infrastructure.Messaging;
 using TradeSimulator.Account.Processors.OrderFunds;
@@ -18,10 +19,11 @@ namespace TradeSimulator.Account.Infrastructure.Database;
 
 public sealed partial class PostgresAccountStore(
     string connectionString,
-    ILogger<PostgresAccountStore> logger) : IAccountStore, IOutbox, IOrderFundsStore, IResponseOutbox, IOutboxBacklogReader
+    ILogger<PostgresAccountStore> logger,
+    IFundsGate? fundsGate = null) : IAccountStore, IOutbox, IOrderFundsStore, IResponseOutbox, IOutboxBacklogReader
 {
-    private const int SnapshotInterval = 1_000;
-    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
+    private const int SnapshotInterval = 10;
+    private static readonly EventStore Events = CreateEventStore();
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public async Task<Result<bool, IAccountError>> InitializeAsync(CancellationToken cancellationToken)
@@ -57,12 +59,12 @@ public sealed partial class PostgresAccountStore(
             var persisted = await PersistOpeningEventAsync(connection, account, cancellationToken);
             if (persisted.IsError)
                 return Result<Domain.Entities.Account, IAccountError>.Error(persisted.ErrorValue);
-            account.MarkCommitted();
+            account.CommitEvents();
             return account;
         }
         catch (PostgresException exception) when (
             exception.SqlState == PostgresErrorCodes.UniqueViolation &&
-            exception.ConstraintName == "ux_account_events_single_open")
+            exception.ConstraintName is "ux_events_stream_version")
         {
             logger.LogInformation(exception, "Account {AccountId} is already open.", id.Guid);
             return Result<Domain.Entities.Account, IAccountError>.Error(new AccountAlreadyExists());
@@ -92,7 +94,7 @@ public sealed partial class PostgresAccountStore(
             var persisted = await AppendAsync(connection, loaded, cancellationToken);
             if (persisted.IsError)
                 return Result<Domain.Entities.Account, IAccountError>.Error(persisted.ErrorValue);
-            loaded.Account.MarkCommitted();
+            loaded.Account.CommitEvents();
             return result;
         }
         finally
@@ -104,10 +106,19 @@ public sealed partial class PostgresAccountStore(
     public async Task<Result<Domain.Entities.Account, IAccountError>> GetAsync(AccountId id, CancellationToken cancellationToken)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
-        var loaded = await LoadAccountAsync(connection, id, cancellationToken);
-        return loaded.IsError
-            ? Result<Domain.Entities.Account, IAccountError>.Error(loaded.ErrorValue)
-            : loaded.ResultValue.Account;
+        const string sql = """
+            SELECT version, available_balance, blocked_balance
+            FROM account_balances
+            WHERE account_id = @id;
+            """;
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("id", id.Guid);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+            return Result<Domain.Entities.Account, IAccountError>.Error(new AccountNotFound());
+
+        var state = new AccountSnapshot(id, reader.GetInt32(0), reader.GetDecimal(1), reader.GetDecimal(2));
+        return Domain.Entities.Account.Rehydrate(id, state, []);
     }
 
     public async Task<IReadOnlyList<PendingEvent>> ReadPendingAsync(int limit, CancellationToken cancellationToken)
@@ -150,12 +161,31 @@ public sealed partial class PostgresAccountStore(
         return connection;
     }
 
-    private static JsonSerializerOptions CreateJsonOptions()
+    private static EventStore CreateEventStore()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        options.Converters.Add(new AccountIdJsonConverter());
-        options.Converters.Add(new OrderIdJsonConverter());
-        return options;
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        json.Converters.Add(new AccountIdJsonConverter());
+        json.Converters.Add(new OrderIdJsonConverter());
+        return new EventStore(new EventStoreOptions(
+            json, [typeof(AccountEvent).Assembly]));
+    }
+
+    private static async Task InsertOutboxAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        AppendedEvent entry,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO event_outbox(position, event_type, payload, traceparent)
+            VALUES(@position, @eventType, @payload::jsonb, @traceParent);
+            """;
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("position", entry.Id);
+        command.Parameters.AddWithValue("eventType", entry.Type);
+        command.Parameters.AddWithValue("payload", entry.Payload);
+        command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<Result<LoadedAccount, IAccountError>> LoadAccountAsync(
@@ -164,7 +194,7 @@ public sealed partial class PostgresAccountStore(
         CancellationToken cancellationToken)
     {
         var snapshot = await LoadSnapshotAsync(connection, id, cancellationToken);
-        var eventsResult = await LoadEventsAsync(connection, id, snapshot?.Position ?? 0, cancellationToken);
+        var eventsResult = await LoadEventsAsync(connection, id, snapshot?.State.Version ?? 0, cancellationToken);
         if (eventsResult.IsError)
             return Result<LoadedAccount, IAccountError>.Error(eventsResult.ErrorValue);
         var events = eventsResult.ResultValue;
@@ -185,9 +215,9 @@ public sealed partial class PostgresAccountStore(
         CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT position, available_balance, provisioned_balance
-            FROM account_snapshots
-            WHERE account_id = @id;
+            SELECT version, available_balance, provisioned_balance
+            FROM snapshots
+            WHERE stream_id = @id;
             """;
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("id", id.Guid);
@@ -195,57 +225,24 @@ public sealed partial class PostgresAccountStore(
         if (!await reader.ReadAsync(cancellationToken))
             return null;
 
-        return new StoredSnapshot(
-            reader.GetInt64(0),
-            new AccountSnapshot(id, reader.GetDecimal(1), reader.GetDecimal(2)));
+        return new StoredSnapshot(new AccountSnapshot(id, reader.GetInt32(0), reader.GetDecimal(1), reader.GetDecimal(2)));
     }
 
     private static async Task<Result<List<AccountEvent>, IAccountError>> LoadEventsAsync(
         NpgsqlConnection connection,
         AccountId id,
-        long afterPosition,
+        int afterVersion,
         CancellationToken cancellationToken)
     {
-        const string sql = """
-            SELECT event_type, payload::text
-            FROM account_events
-            WHERE account_id = @id AND position > @afterPosition
-            ORDER BY position;
-            """;
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("id", id.Guid);
-        command.Parameters.AddWithValue("afterPosition", afterPosition);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var events = new List<AccountEvent>();
-        while (await reader.ReadAsync(cancellationToken))
+        try
         {
-            var type = reader.GetString(0);
-            var payload = reader.GetString(1);
-            AccountEvent? accountEvent;
-            try
-            {
-                accountEvent = type switch
-                {
-                    nameof(AccountOpened) => JsonSerializer.Deserialize<AccountOpened>(payload, JsonOptions),
-                    nameof(MoneyDeposited) => JsonSerializer.Deserialize<MoneyDeposited>(payload, JsonOptions),
-                    nameof(MoneyWithdrawn) => JsonSerializer.Deserialize<MoneyWithdrawn>(payload, JsonOptions),
-                    nameof(FundsReserved) => JsonSerializer.Deserialize<FundsReserved>(payload, JsonOptions),
-                    nameof(FundsReleased) => JsonSerializer.Deserialize<FundsReleased>(payload, JsonOptions),
-                    nameof(FundsDebited) => JsonSerializer.Deserialize<FundsDebited>(payload, JsonOptions),
-                    _ => null
-                };
-            }
-            catch (JsonException)
-            {
-                return Result<List<AccountEvent>, IAccountError>.Error(new CorruptAccountHistory());
-            }
-
-            if (accountEvent is null)
-                return Result<List<AccountEvent>, IAccountError>.Error(new CorruptAccountHistory());
-            events.Add(accountEvent);
+            var stored = await Events.ReadStreamAsync(connection, id.Guid, cancellationToken, afterVersion);
+            return stored.Select(entry => (AccountEvent)entry.Event).ToList();
         }
-
-        return events;
+        catch (CorruptEventStreamException)
+        {
+            return Result<List<AccountEvent>, IAccountError>.Error(new CorruptAccountHistory());
+        }
     }
 
     private static async Task<Result<bool, IAccountError>> AppendAsync(
@@ -272,40 +269,17 @@ public sealed partial class PostgresAccountStore(
         CancellationToken cancellationToken)
     {
         var account = loaded.Account;
-        long lastPosition = 0;
-        foreach (var @event in account.UncommittedEvents)
-        {
-            var eventType = @event.GetType().Name;
-            var payload = JsonSerializer.Serialize(@event, @event.GetType(), JsonOptions);
-            const string insertEventSql = """
-                INSERT INTO account_events(account_id, event_type, payload)
-                VALUES(@accountId, @eventType, @payload::jsonb)
-                RETURNING position;
-                """;
-            await using var insertEvent = new NpgsqlCommand(insertEventSql, connection, transaction);
-            insertEvent.Parameters.AddWithValue("accountId", account.Id.Guid);
-            insertEvent.Parameters.AddWithValue("eventType", eventType);
-            insertEvent.Parameters.AddWithValue("payload", payload);
-            var insertedPosition = await insertEvent.ExecuteScalarAsync(cancellationToken);
-            if (insertedPosition is not long position)
-                return Result<bool, IAccountError>.Error(new AccountPersistenceFailure());
-            lastPosition = position;
+        var appended = await Events.AppendAsync(connection, transaction, account.UncommittedEvents, account.Version - account.UncommittedEvents.Count + 1, cancellationToken);
+        foreach (var entry in appended)
+            await InsertOutboxAsync(connection, transaction, entry, cancellationToken);
 
-            const string insertOutboxSql = """
-                INSERT INTO event_outbox(position, event_type, payload, traceparent)
-                VALUES(@position, @eventType, @payload::jsonb, @traceParent);
-                """;
-            await using var insertOutbox = new NpgsqlCommand(insertOutboxSql, connection, transaction);
-            insertOutbox.Parameters.AddWithValue("position", lastPosition);
-            insertOutbox.Parameters.AddWithValue("eventType", eventType);
-            insertOutbox.Parameters.AddWithValue("payload", payload);
-            insertOutbox.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
-            await insertOutbox.ExecuteNonQueryAsync(cancellationToken);
-        }
+        var balance = await UpsertBalanceAsync(connection, transaction, account, cancellationToken);
+        if (balance.IsError)
+            return balance;
 
         if (loaded.EventsSinceSnapshot + account.UncommittedEvents.Count >= SnapshotInterval)
         {
-            var snapshot = await UpsertSnapshotAsync(connection, transaction, account, lastPosition, cancellationToken);
+            var snapshot = await UpsertSnapshotAsync(connection, transaction, account, cancellationToken);
             if (snapshot.IsError)
                 return Result<bool, IAccountError>.Error(snapshot.ErrorValue);
         }
@@ -313,18 +287,46 @@ public sealed partial class PostgresAccountStore(
         return true;
     }
 
+    // The read model changes in the same transaction as the events: balances are never stale.
+    private static async Task<Result<bool, IAccountError>> UpsertBalanceAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Domain.Entities.Account account,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO account_balances(account_id, version, available_balance, blocked_balance)
+            VALUES(@accountId, @version, @availableBalance, @blockedBalance)
+            ON CONFLICT (account_id) DO UPDATE
+            SET version = EXCLUDED.version,
+                available_balance = EXCLUDED.available_balance,
+                blocked_balance = EXCLUDED.blocked_balance,
+                updated_at = CURRENT_TIMESTAMP;
+            """;
+        var snapshotResult = account.CreateSnapshot();
+        if (snapshotResult.IsError)
+            return Result<bool, IAccountError>.Error(snapshotResult.ErrorValue);
+        var state = snapshotResult.ResultValue;
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("accountId", state.AccountId.Guid);
+        command.Parameters.AddWithValue("version", state.Version);
+        command.Parameters.AddWithValue("availableBalance", state.AvailableBalance);
+        command.Parameters.AddWithValue("blockedBalance", state.ProvisionedBalance);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        return true;
+    }
+
     private static async Task<Result<bool, IAccountError>> UpsertSnapshotAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         Domain.Entities.Account account,
-        long position,
         CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO account_snapshots(account_id, position, available_balance, provisioned_balance)
-            VALUES(@accountId, @position, @availableBalance, @provisionedBalance)
-            ON CONFLICT (account_id) DO UPDATE
-            SET position = EXCLUDED.position,
+            INSERT INTO snapshots(stream_id, version, available_balance, provisioned_balance)
+            VALUES(@accountId, @version, @availableBalance, @provisionedBalance)
+            ON CONFLICT (stream_id) DO UPDATE
+            SET version = EXCLUDED.version,
                 available_balance = EXCLUDED.available_balance,
                 provisioned_balance = EXCLUDED.provisioned_balance,
                 updated_at = CURRENT_TIMESTAMP;
@@ -335,7 +337,7 @@ public sealed partial class PostgresAccountStore(
         var snapshot = snapshotResult.ResultValue;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("accountId", snapshot.AccountId.Guid);
-        command.Parameters.AddWithValue("position", position);
+        command.Parameters.AddWithValue("version", snapshot.Version);
         command.Parameters.AddWithValue("availableBalance", snapshot.AvailableBalance);
         command.Parameters.AddWithValue("provisionedBalance", snapshot.ProvisionedBalance);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -347,35 +349,17 @@ public sealed partial class PostgresAccountStore(
         Domain.Entities.Account account,
         CancellationToken cancellationToken)
     {
-        var openingEvent = account.UncommittedEvents.Single();
-        var eventType = openingEvent.GetType().Name;
-        var payload = JsonSerializer.Serialize(openingEvent, openingEvent.GetType(), JsonOptions);
-        const string sql = """
-            WITH inserted_event AS (
-                INSERT INTO account_events(account_id, event_type, payload)
-                VALUES(@accountId, @eventType, @payload::jsonb)
-                RETURNING position, event_type, payload
-            ),
-            inserted_outbox AS (
-                INSERT INTO event_outbox(position, event_type, payload, traceparent)
-                SELECT position, event_type, payload, @traceParent::text
-                FROM inserted_event
-                RETURNING position
-            )
-            SELECT position FROM inserted_event;
-            """;
-        await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("accountId", account.Id.Guid);
-        command.Parameters.AddWithValue("eventType", eventType);
-        command.Parameters.AddWithValue("payload", payload);
-        command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
-        var position = await command.ExecuteScalarAsync(cancellationToken);
-        return position is long
-            ? true
-            : Result<bool, IAccountError>.Error(new AccountPersistenceFailure());
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var appended = await Events.AppendAsync(connection, transaction, [account.UncommittedEvents.Single()], 1, cancellationToken);
+        await InsertOutboxAsync(connection, transaction, appended[0], cancellationToken);
+        var balance = await UpsertBalanceAsync(connection, transaction, account, cancellationToken);
+        if (balance.IsError)
+            return balance;
+        await transaction.CommitAsync(cancellationToken);
+        return true;
     }
 
     private sealed record LoadedAccount(Domain.Entities.Account Account, int EventsSinceSnapshot);
 
-    private sealed record StoredSnapshot(long Position, AccountSnapshot State);
+    private sealed record StoredSnapshot(AccountSnapshot State);
 }

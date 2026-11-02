@@ -109,7 +109,7 @@ public sealed class AccountTests
         Assert.True(account.Reserve(50m).IsOk);
         Assert.True(account.Withdraw(30m).IsOk);
 
-        var rehydrated = Value(Domain.Entities.Account.Rehydrate(account.Id, account.UncommittedEvents));
+        var rehydrated = Value(Domain.Entities.Account.Rehydrate(account.Id, account.UncommittedEvents.Cast<Domain.Events.AccountEvent>()));
 
         Assert.Equal(70m, rehydrated.AvailableBalance);
         Assert.Equal(50m, rehydrated.ProvisionedBalance);
@@ -124,7 +124,7 @@ public sealed class AccountTests
         var snapshot = Value(account.CreateSnapshot());
 
         Assert.True(account.Withdraw(30m).IsOk);
-        var rehydrated = Value(Domain.Entities.Account.Rehydrate(account.Id, snapshot, [account.UncommittedEvents[^1]]));
+        var rehydrated = Value(Domain.Entities.Account.Rehydrate(account.Id, snapshot, [(Domain.Events.AccountEvent)account.UncommittedEvents[^1]]));
 
         Assert.Equal(70m, rehydrated.AvailableBalance);
         Assert.Equal(50m, rehydrated.ProvisionedBalance);

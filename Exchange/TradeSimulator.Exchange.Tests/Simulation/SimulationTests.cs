@@ -22,10 +22,12 @@ public sealed class SimulationTests
     [Fact]
     public void Session_phases()
     {
-        Assert.Equal(SessionPhase.PreOpen, TradingSession.At(Day.AddHours(9.99)).Phase);
-        var open = TradingSession.At(Day.AddHours(10).AddSeconds(5));
-        Assert.Equal((SessionPhase.Open, 5), (open.Phase, open.Step));
-        Assert.Equal(SessionPhase.Closed, TradingSession.At(Day.AddHours(18)).Phase);
+        var midnight = TradingSession.At(Day);
+        Assert.Equal((SessionPhase.Open, 0), (midnight.Phase, midnight.Step));
+        var night = TradingSession.At(Day.AddHours(3).AddSeconds(5));
+        Assert.Equal((SessionPhase.Open, 3 * 3600 + 5), (night.Phase, night.Step));
+        var lastSecond = TradingSession.At(Day.AddHours(24).AddSeconds(-1));
+        Assert.Equal((SessionPhase.Open, TradingSession.Steps - 1), (lastSecond.Phase, lastSecond.Step));
     }
 
     [Theory]
@@ -55,18 +57,13 @@ public sealed class SimulationTests
     }
 
     [Fact]
-    public async Task Simulator_emits_phases_and_variation()
+    public async Task Simulator_runs_around_the_clock_and_emits_variation()
     {
         var simulator = new QuoteSimulator(
             new FakeSource(Parameters()), new FakePublisher(), new QuoteInterestRegistry(TimeProvider.System),
             new Random(7), NullLogger<QuoteSimulator>.Instance);
 
-        var pre = await simulator.NextQuoteAsync(Petr, Day.AddHours(9), default);
-        Assert.NotNull(pre);
-        Assert.Equal((34.5m, QuoteVariation.Unchanged), (pre.Last, pre.Variation));
-        Assert.Equal(pre.Close, pre.Open);
-
-        var first = await simulator.NextQuoteAsync(Petr, Day.AddHours(10).AddSeconds(1), default);
+        var first = await simulator.NextQuoteAsync(Petr, Day.AddSeconds(1), default);
         Assert.Equal(35m, first!.Open);
         Assert.Equal(34.5m, first.Close);
 
@@ -75,8 +72,8 @@ public sealed class SimulationTests
             : later.Last > first.Last ? QuoteVariation.Up : QuoteVariation.Down;
         Assert.Equal(expected, later.Variation);
 
-        var closed = await simulator.NextQuoteAsync(Petr, Day.AddHours(19), default);
-        Assert.Equal(36m, closed!.Last);
+        var nextDay = await simulator.NextQuoteAsync(Petr, Day.AddDays(1).AddSeconds(1), default);
+        Assert.Equal(35m, nextDay!.Open);
     }
 
     [Fact]

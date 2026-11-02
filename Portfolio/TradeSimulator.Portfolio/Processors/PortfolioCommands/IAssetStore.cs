@@ -7,6 +7,9 @@ namespace TradeSimulator.Portfolio.Processors.PortfolioCommands;
 
 public interface IAssetStore
 {
+    // Replays the stream (snapshot + events) into the aggregate.
+    Task<Result<Asset, IPortfolioError>> LoadAsync(Guid assetId, CancellationToken cancellationToken);
+
     // Finds the active asset (Total > 0) of the account; AssetNotFound when there is none.
     Task<Result<Asset, IPortfolioError>> FindAsync(AccountId accountId, Ticker ticker, CancellationToken cancellationToken);
 
@@ -19,7 +22,7 @@ public interface IAssetStore
     // Persists the blocked asset events, the order reservation and the success response atomically.
     // DuplicateEnvelope when the envelope or the order was already reserved; ConcurrencyConflict when the stream moved on.
     Task<Result<Asset, IPortfolioError>> ReserveAsync(
-        Guid envelopeId, Asset asset, OrderReservation reservation, AssetsBlocked blocked, CancellationToken cancellationToken);
+        Guid envelopeId, Asset asset, OrderReservation reservation, AssetsBlocked blocked, CancellationToken cancellationToken, bool notify = true);
 
     // Queues the failure response of a reservation; false when the envelope was already answered.
     Task<bool> RejectReservationAsync(Guid envelopeId, AssetBlockError error, CancellationToken cancellationToken);

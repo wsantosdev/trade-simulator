@@ -3,7 +3,7 @@ using TradeSimulator.Portfolio.Domain.ValueObjects;
 
 namespace TradeSimulator.Portfolio.Common;
 
-// Query model as stored in the database (asset_read_model).
+// Query model of an asset, as stored in the MongoDB read model.
 public sealed record AssetReadModel(Guid AssetId, Guid AccountId, string Ticker, long Available, long Blocked, long Total)
 {
     public static AssetReadModel From(Asset asset) =>

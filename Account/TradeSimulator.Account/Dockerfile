@@ -8,6 +8,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Shared/TradeSimulator.Commons/TradeSimulator.Commons.csproj", "Shared/TradeSimulator.Commons/"]
+COPY ["Shared/TradeSimulator.EventSourcing/TradeSimulator.EventSourcing.csproj", "Shared/TradeSimulator.EventSourcing/"]
 COPY ["Account/TradeSimulator.Account/TradeSimulator.Account.csproj", "Account/TradeSimulator.Account/"]
 RUN dotnet restore "Account/TradeSimulator.Account/TradeSimulator.Account.csproj"
 COPY . .

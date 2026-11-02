@@ -1,13 +1,13 @@
 using Moonad;
+using TradeSimulator.EventSourcing;
 using TradeSimulator.Orders.Domain.Enums;
 using TradeSimulator.Orders.Domain.Events;
 using TradeSimulator.Orders.Domain.ValueObjects;
 
 namespace TradeSimulator.Orders.Domain.Entities;
 
-public sealed class Order
+public sealed class Order : EventSourcedEntity
 {
-    private readonly List<OrderEvent> _uncommitted = [];
     private OrderState _restingState = OrderState.PendingNew;
     private decimal? _pendingPrice;
     private long _filledQuantity;
@@ -42,12 +42,12 @@ public sealed class Order
     public decimal? AveragePrice => _filledQuantity > 0 ? _filledNotional / _filledQuantity : null;
     public decimal? LastPrice { get; private set; }
     public DateTimeOffset? LastTradeAt { get; private set; }
-    public int Version { get; private set; }
+    // False until the internal validation (funds or position) succeeded; orders refused by it are never shown to the user.
+    public bool PassedValidation { get; private set; }
     public RequestHash RequestHash { get; }
     public OrderState State { get; private set; }
     public DateTimeOffset SentAt { get; }
     public DateTimeOffset LastActionAt { get; private set; }
-    public IReadOnlyList<OrderEvent> UncommittedEvents => _uncommitted;
 
     public static Result<Order, IOrderError> Send(
         OrderId id,
@@ -85,7 +85,7 @@ public sealed class Order
 
         var sent = new OrderSubmitted(id, account.ResultValue, symbol.ResultValue, side, type, quantity, price, hash.ResultValue, now);
         var order = new Order(sent);
-        order._uncommitted.Add(sent);
+        order.Record(sent);
         return order;
     }
 
@@ -102,13 +102,11 @@ public sealed class Order
         {
             if (@event is OrderSubmitted)
                 return new CorruptOrderHistory();
-            order.Apply(@event);
+            order.ReplayEvent(@event);
         }
 
         return order;
     }
-
-    public void MarkCommitted() => _uncommitted.Clear();
 
     public Result<Order, IOrderError> RequestCancel(DateTimeOffset now) =>
         State switch
@@ -205,19 +203,20 @@ public sealed class Order
 
     private Result<Order, IOrderError> Raise(OrderEvent @event)
     {
-        Apply(@event);
-        _uncommitted.Add(@event);
+        RaiseEvent(@event);
         return this;
     }
 
-    private void Apply(OrderEvent @event)
+    protected override void ProcessEvent(IEvent domainEvent)
     {
-        switch (@event)
+        switch (domainEvent)
         {
             case OrderDispatched:
+                PassedValidation = true;
                 State = OrderState.PendingNew;
                 break;
             case OrderScheduled:
+                PassedValidation = true;
                 State = OrderState.ScheduledDispatching;
                 break;
             case OrderScheduleCancelled:
@@ -271,8 +270,7 @@ public sealed class Order
                 break;
         }
 
-        LastActionAt = @event.OccurredAt;
-        Version++;
+        LastActionAt = ((OrderEvent)domainEvent).OccurredAt;
     }
 
     private void RegisterFill(long quantity, decimal price, DateTimeOffset at)

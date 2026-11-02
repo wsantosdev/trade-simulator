@@ -66,7 +66,7 @@ public sealed class OrderLifecycleTests
     {
         var order = NewOrder();
 
-        var restored = Order.Rehydrate(order.UncommittedEvents, legacyOpening: true).ResultValue;
+        var restored = Order.Rehydrate(order.UncommittedEvents.Cast<OrderEvent>().ToList(), legacyOpening: true).ResultValue;
 
         Assert.Equal(OrderState.PendingNew, restored.State);
         Assert.Equal(1, restored.Version);
@@ -240,7 +240,7 @@ public sealed class OrderLifecycleTests
         order.RequestReplace(12m, At(3));
         order.Replace(40, 60, At(4));
 
-        var restored = Order.Rehydrate(order.UncommittedEvents).ResultValue;
+        var restored = Order.Rehydrate(order.UncommittedEvents.Cast<OrderEvent>().ToList()).ResultValue;
 
         Assert.Equal(order.State, restored.State);
         Assert.Equal(order.Price, restored.Price);

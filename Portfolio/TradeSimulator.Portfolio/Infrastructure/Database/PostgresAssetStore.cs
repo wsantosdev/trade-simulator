@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Moonad;
 using Npgsql;
+using TradeSimulator.EventSourcing;
 using NpgsqlTypes;
 using TradeSimulator.Portfolio.Common;
 using TradeSimulator.Portfolio.Domain;
@@ -20,7 +21,8 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
     : IAssetStore, IOutbox, IOutboxBacklogReader
 {
     public const int SnapshotInterval = 100;
-    private const string EnvelopeConstraint = "ux_portfolio_outbox_envelope";
+    private static readonly EventStore Events = AssetEventStore.Create();
+    private const string EnvelopeConstraint = "ux_event_outbox_envelope";
     private const string ReservationConstraint = "order_reservations_pkey";
     private const string ProcessedConstraint = "processed_order_events_pkey";
     public const string SucceededRoutingKey = "asset.command.succeeded";
@@ -69,7 +71,6 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            await ProjectReadModelAsync(asset, connection, transaction, cancellationToken);
             await InsertOutboxAsync(result, connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
@@ -82,7 +83,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
             return new AssetAlreadyExists();
         }
 
-        asset.MarkCommitted();
+        asset.CommitEvents();
         return asset;
     }
 
@@ -99,7 +100,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
     }
 
     public async Task<Result<Asset, IPortfolioError>> ReserveAsync(
-        Guid envelopeId, Asset asset, OrderReservation reservation, AssetsBlocked blocked, CancellationToken cancellationToken)
+        Guid envelopeId, Asset asset, OrderReservation reservation, AssetsBlocked blocked, CancellationToken cancellationToken, bool notify = true)
     {
         if (asset.UncommittedEvents.Count == 0)
             throw new InvalidOperationException("There are no uncommitted events to append.");
@@ -122,7 +123,8 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
                     await command.ExecuteNonQueryAsync(token);
                 }
 
-                await InsertReservationOutboxAsync(AssetReservationEvents.BlockedRoutingKey, envelopeId, ReservationResponse(Result<AssetsBlocked, AssetBlockError>.Ok(blocked)), connection, transaction, token);
+                if (notify)
+                    await InsertReservationOutboxAsync(AssetReservationEvents.BlockedRoutingKey, envelopeId, ReservationResponse(Result<AssetsBlocked, AssetBlockError>.Ok(blocked)), connection, transaction, token);
                 return true;
             },
             cancellationToken);
@@ -211,8 +213,6 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
                 if (!await UpdateActiveAssetAsync(asset!, previousVersion, connection, transaction, cancellationToken))
                     return new ConcurrencyConflict();
 
-                await ProjectReadModelAsync(asset!, connection, transaction, cancellationToken);
-
                 if (!asset!.IsRemoved && asset.Version / SnapshotInterval > previousVersion / SnapshotInterval)
                     await UpsertSnapshotAsync(asset, connection, transaction, cancellationToken);
             }
@@ -232,7 +232,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         }
 
         if (hasEvents)
-            asset!.MarkCommitted();
+            asset!.CommitEvents();
         return true;
     }
 
@@ -240,7 +240,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
     {
         const string sql = """
             SELECT position, routing_key, payload::text, exchange, traceparent
-            FROM portfolio_outbox
+            FROM event_outbox
             WHERE published_at IS NULL
             ORDER BY position
             LIMIT @limit;
@@ -258,7 +258,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
     {
         const string sql = """
             SELECT COUNT(*), COALESCE(EXTRACT(EPOCH FROM now() - MIN(created_at)), 0)
-            FROM portfolio_outbox WHERE published_at IS NULL;
+            FROM event_outbox WHERE published_at IS NULL;
             """;
         await using var command = dataSource.CreateCommand(sql);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -269,7 +269,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
     public async Task MarkPublishedAsync(long position, CancellationToken cancellationToken)
     {
         const string sql = """
-            UPDATE portfolio_outbox
+            UPDATE event_outbox
             SET published_at = @publishedAt
             WHERE position = @position AND published_at IS NULL;
             """;
@@ -279,10 +279,10 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private async Task<Result<Asset, IPortfolioError>> LoadAsync(Guid assetId, CancellationToken cancellationToken)
+    public async Task<Result<Asset, IPortfolioError>> LoadAsync(Guid assetId, CancellationToken cancellationToken)
     {
         AssetSnapshot? snapshot = null;
-        const string snapshotSql = "SELECT payload::text FROM asset_snapshots WHERE asset_id = @assetId;";
+        const string snapshotSql = "SELECT payload::text FROM snapshots WHERE stream_id = @assetId;";
         await using (var command = dataSource.CreateCommand(snapshotSql))
         {
             command.Parameters.AddWithValue("assetId", assetId);
@@ -299,56 +299,42 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
             }
         }
 
-        const string eventsSql = """
-            SELECT event_type, payload::text
-            FROM asset_events
-            WHERE asset_id = @assetId AND sequence > @fromVersion
-            ORDER BY sequence;
-            """;
-        var history = new List<AssetEvent>();
-        await using (var command = dataSource.CreateCommand(eventsSql))
+        List<AssetEvent> history;
+        try
         {
-            command.Parameters.AddWithValue("assetId", assetId);
-            command.Parameters.AddWithValue("fromVersion", snapshot?.Version ?? 0);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                AssetEvent? @event;
-                try
-                {
-                    @event = AssetEventSerializer.Deserialize(reader.GetString(0), reader.GetString(1));
-                }
-                catch (JsonException)
-                {
-                    return new CorruptAssetHistory();
-                }
-
-                if (@event is null)
-                    return new CorruptAssetHistory();
-                history.Add(@event);
-            }
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            var stored = await Events.ReadStreamAsync(connection, assetId, cancellationToken, afterVersion: snapshot?.Version ?? 0);
+            history = stored.Select(entry => (AssetEvent)entry.Event).ToList();
+        }
+        catch (CorruptEventStreamException)
+        {
+            return new CorruptAssetHistory();
         }
 
         return snapshot is null ? Asset.Rehydrate(history) : Asset.Restore(snapshot, history);
     }
 
+    // Every appended event is also queued in the outbox (same transaction) so the read model can react to it.
     private static async Task InsertEventsAsync(
         Asset asset, NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
     {
+        var firstVersion = asset.Version - asset.UncommittedEvents.Count + 1;
+        var appended = await Events.AppendAsync(connection, transaction, asset.UncommittedEvents, firstVersion, cancellationToken);
         const string sql = """
-            INSERT INTO asset_events (asset_id, sequence, event_type, payload, occurred_at)
-            VALUES (@assetId, @sequence, @eventType, @payload, @occurredAt);
+            INSERT INTO event_outbox (routing_key, payload, traceparent)
+            VALUES (@routingKey, @payload, @traceParent);
             """;
-        var sequence = asset.Version - asset.UncommittedEvents.Count;
-        foreach (var @event in asset.UncommittedEvents)
+        for (var i = 0; i < appended.Count; i++)
         {
-            sequence++;
+            var changed = new AssetChanged(asset.Id.Guid, firstVersion + i, appended[i].Type);
+            var envelope = new EventEnvelope<AssetChanged>(Guid.CreateVersion7(), AssetChanged.EventType, changed);
             await using var command = new NpgsqlCommand(sql, connection, transaction);
-            command.Parameters.AddWithValue("assetId", @event.AssetId.Guid);
-            command.Parameters.AddWithValue("sequence", sequence);
-            command.Parameters.AddWithValue("eventType", @event.GetType().Name);
-            command.Parameters.Add(new NpgsqlParameter("payload", NpgsqlDbType.Jsonb) { Value = AssetEventSerializer.Serialize(@event) });
-            command.Parameters.AddWithValue("occurredAt", @event.OccurredAt);
+            command.Parameters.AddWithValue("routingKey", AssetChanged.RoutingKey);
+            command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
+            command.Parameters.Add(new NpgsqlParameter("payload", NpgsqlDbType.Jsonb)
+            {
+                Value = JsonSerializer.Serialize(envelope, PortfolioJson.Options)
+            });
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -370,37 +356,14 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
-    // Keeps the query model in step with the events, inside the same transaction; an emptied asset leaves the portfolio.
-    private static async Task ProjectReadModelAsync(
-        Asset asset, NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
-    {
-        var sql = asset.IsRemoved
-            ? "DELETE FROM asset_read_model WHERE asset_id = @assetId;"
-            : """
-              INSERT INTO asset_read_model (asset_id, account_id, ticker, available, blocked)
-              VALUES (@assetId, @accountId, @ticker, @available, @blocked)
-              ON CONFLICT (asset_id) DO UPDATE SET available = EXCLUDED.available, blocked = EXCLUDED.blocked;
-              """;
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
-        command.Parameters.AddWithValue("assetId", asset.Id.Guid);
-        if (!asset.IsRemoved)
-        {
-            command.Parameters.AddWithValue("accountId", asset.AccountId.Guid);
-            command.Parameters.AddWithValue("ticker", asset.Ticker.Value);
-            command.Parameters.AddWithValue("available", asset.Available.Value);
-            command.Parameters.AddWithValue("blocked", asset.Blocked.Value);
-        }
-
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
     private static async Task UpsertSnapshotAsync(
         Asset asset, NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO asset_snapshots (asset_id, version, payload)
+            INSERT INTO snapshots (stream_id, version, payload)
             VALUES (@assetId, @version, @payload)
-            ON CONFLICT (asset_id) DO UPDATE SET version = EXCLUDED.version, payload = EXCLUDED.payload;
+            ON CONFLICT (stream_id) DO UPDATE
+            SET version = EXCLUDED.version, payload = EXCLUDED.payload, updated_at = CURRENT_TIMESTAMP;
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("assetId", asset.Id.Guid);
@@ -420,7 +383,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
         NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO portfolio_outbox (routing_key, payload, envelope_id, exchange, traceparent)
+            INSERT INTO event_outbox (routing_key, payload, envelope_id, exchange, traceparent)
             VALUES (@routingKey, @payload, @envelopeId, @exchange, @traceParent);
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
@@ -442,7 +405,7 @@ public sealed class PostgresAssetStore(NpgsqlDataSource dataSource, ILogger<Post
             Guid.CreateVersion7(), PortfolioEventTypes.CommandResult,
             Result<PortfolioCommandResult, PortfolioCommandError>.Ok(result));
         const string sql = """
-            INSERT INTO portfolio_outbox (routing_key, payload, envelope_id, traceparent)
+            INSERT INTO event_outbox (routing_key, payload, envelope_id, traceparent)
             VALUES (@routingKey, @payload, @envelopeId, @traceParent);
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);

@@ -1,6 +1,7 @@
 using System.Text;
 using RabbitMQ.Client;
 using TradeSimulator.Commons.Telemetry;
+using TradeSimulator.Orders.Infrastructure.Database;
 using TradeSimulator.Orders.Infrastructure.Telemetry;
 
 namespace TradeSimulator.Orders.Infrastructure.Messaging;
@@ -8,6 +9,7 @@ namespace TradeSimulator.Orders.Infrastructure.Messaging;
 public sealed class RabbitMqCommandPublisher(IConfiguration configuration) : ICommandPublisher, IAsyncDisposable
 {
     public const string ExchangeName = "trade-simulator-order-commands";
+    public const string EventsExchangeName = "trade-simulator.orders.events";
 
     private IConnection? _connection;
     private IChannel? _channel;
@@ -28,18 +30,22 @@ public sealed class RabbitMqCommandPublisher(IConfiguration configuration) : ICo
                 _connection = await factory.CreateConnectionAsync(cancellationToken);
                 _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
                 await _channel.ExchangeDeclareAsync(ExchangeName, ExchangeType.Topic, durable: true, cancellationToken: cancellationToken);
+                await _channel.ExchangeDeclareAsync(EventsExchangeName, ExchangeType.Topic, durable: true, cancellationToken: cancellationToken);
+                // Bound before the first event so none is dropped while the projection consumer is still starting.
+                await _channel.QueueDeclareAsync(
+                    RabbitMqOrderProjectionConsumer.QueueName, durable: true, exclusive: false, autoDelete: false, cancellationToken: cancellationToken);
+                await _channel.QueueBindAsync(
+                    RabbitMqOrderProjectionConsumer.QueueName, EventsExchangeName, "#", cancellationToken: cancellationToken);
             }
 
             var properties = new BasicProperties { ContentType = "application/json", DeliveryMode = DeliveryModes.Persistent };
             if (activity?.Id is { } traceParent)
                 properties.Headers = new Dictionary<string, object?> { [ServiceTelemetry.TraceParentHeader] = traceParent };
-            await _channel.BasicPublishAsync(
-                exchange: ExchangeName,
-                routingKey: pendingEvent.EventType,
-                mandatory: false,
-                basicProperties: properties,
-                body: Encoding.UTF8.GetBytes(pendingEvent.Payload),
-                cancellationToken: cancellationToken);
+            var body = Encoding.UTF8.GetBytes(pendingEvent.Payload);
+            // Every event feeds the read model; only the commands also go to the Exchange.
+            if (OrderEventSerializer.IsCommand(pendingEvent.EventType))
+                await _channel.BasicPublishAsync(ExchangeName, pendingEvent.EventType, false, properties, body, cancellationToken);
+            await _channel.BasicPublishAsync(EventsExchangeName, pendingEvent.EventType, false, properties, body, cancellationToken);
             OrdersTelemetry.Service.OutboxPublished(ExchangeName);
         }
         catch (Exception exception)

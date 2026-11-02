@@ -4,7 +4,7 @@ using TradeSimulator.Portfolio.Processors.PortfolioCommands;
 
 namespace TradeSimulator.Portfolio.Infrastructure.Messaging;
 
-// Orders events: a sell OrderSubmitted reserves the quantity; everything else (buy orders included) is discarded.
+// Orders events: only the cancellation of a scheduled order is handled (it releases the blocked quantity).
 public sealed class OrderEventMessageHandler(
     PortfolioCommandProcessor processor,
     ILogger<OrderEventMessageHandler> logger)
@@ -21,37 +21,8 @@ public sealed class OrderEventMessageHandler(
             return;
         }
 
-        if (envelope.EventType != PortfolioEventTypes.OrderSubmitted)
-        {
-            logger.LogDebug("Discarded order event {EventType}.", envelope.EventType);
-            return;
-        }
-
-        if (!EnvelopeReader.HasValidId(envelope))
-        {
-            logger.LogWarning("Discarded {EventType} with an invalid envelope id.", envelope.EventType);
-            return;
-        }
-
-        OrderSubmittedMessage submitted;
-        try
-        {
-            submitted = EnvelopeReader.Read<OrderSubmittedMessage>(envelope.Event);
-        }
-        catch (JsonException exception)
-        {
-            logger.LogWarning(exception, "Command {EventType} {EnvelopeId} has an invalid payload.", envelope.EventType, envelope.Id);
-            return;
-        }
-
-        if (submitted.Side != OrderSide.Sell)
-        {
-            logger.LogDebug("Discarded buy order {EnvelopeId}.", envelope.Id);
-            return;
-        }
-
-        await processor.ReserveAsync(
-            envelope.Id, new SellOrder(submitted.OrderId, submitted.AccountId, submitted.Ticker, submitted.Quantity), cancellationToken);
+        // Sell orders are reserved synchronously by Orders over HTTP; nothing else is handled here.
+        logger.LogDebug("Discarded order event {EventType}.", envelope.EventType);
     }
 
     // A scheduled order cancelled in Orders never reached the Exchange: release the whole reservation.

@@ -17,7 +17,8 @@ public sealed partial class PostgresAccountStore
         OrderId orderId,
         AccountId accountId,
         decimal amount,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool notify = true)
     {
         await _gate.WaitAsync(cancellationToken);
         try
@@ -56,12 +57,15 @@ public sealed partial class PostgresAccountStore
                 await insert.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            var success = new FundsReservationResponse(
-                Guid.CreateVersion7(),
-                FundsEventTypes.ReservationResult,
-                Result<FundsReservedMessage, FundsReservationError>.Ok(
-                    new FundsReservedMessage(orderId.Guid, accountId.Guid, amount)));
-            await EnqueueResponseAsync(connection, transaction, FundsEventTypes.ReservedRoutingKey, success, cancellationToken);
+            if (notify)
+            {
+                var success = new FundsReservationResponse(
+                    Guid.CreateVersion7(),
+                    FundsEventTypes.ReservationResult,
+                    Result<FundsReservedMessage, FundsReservationError>.Ok(
+                        new FundsReservedMessage(orderId.Guid, accountId.Guid, amount)));
+                await EnqueueResponseAsync(connection, transaction, FundsEventTypes.ReservedRoutingKey, success, cancellationToken);
+            }
             await transaction.CommitAsync(cancellationToken);
             return OrderFundsOutcome.Applied;
         }
@@ -219,6 +223,8 @@ public sealed partial class PostgresAccountStore
             }
 
             await transaction.CommitAsync(cancellationToken);
+            if (fundsGate is not null)
+                await fundsGate.InvalidateAsync(accountId.ResultValue, CancellationToken.None);
             return OrderFundsOutcome.Applied;
         }
         finally

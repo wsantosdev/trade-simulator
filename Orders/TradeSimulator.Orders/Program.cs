@@ -1,3 +1,7 @@
+using MongoDB.Driver;
+using TradeSimulator.Orders.Infrastructure.ReadModel;
+using TradeSimulator.Orders.Infrastructure.Reservations;
+using TradeSimulator.Orders.Processors;
 using TradeSimulator.Commons.Messaging;
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
@@ -15,9 +19,7 @@ using TradeSimulator.Orders.Infrastructure.Messaging;
 using TradeSimulator.Orders.Infrastructure.Realtime;
 using TradeSimulator.Orders.Infrastructure.Serialization;
 using TradeSimulator.Orders.Infrastructure.Telemetry;
-using TradeSimulator.Orders.Processors.AssetReservation;
 using TradeSimulator.Orders.Processors.OrderTransition;
-using TradeSimulator.Orders.Processors.FundsReservation;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Orders");
@@ -49,13 +51,19 @@ builder.Services.AddSingleton<PostgresOrderStore>();
 builder.Services.AddSingleton<IOrderStore>(sp => sp.GetRequiredService<PostgresOrderStore>());
 builder.Services.AddSingleton<IOutbox>(sp => sp.GetRequiredService<PostgresOrderStore>());
 builder.Services.AddOutboxBacklogMonitor<PostgresOrderStore>();
-builder.Services.AddSingleton<PostgresOrderSearch>();
-builder.Services.AddSingleton<IOrderSearch>(sp => sp.GetRequiredService<PostgresOrderSearch>());
-builder.Services.AddSingleton<IScheduledOrders>(sp => sp.GetRequiredService<PostgresOrderSearch>());
-builder.Services.AddSingleton<IMarketHours>(sp => new MarketHours(
-    sp.GetRequiredService<TimeProvider>(), builder.Configuration.GetValue<TimeSpan>("Simulation:SessionClockOffset")));
+MongoSetup.Initialize();
+builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(
+    builder.Configuration.GetConnectionString("Mongo") ?? "mongodb://localhost:27017"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoClient>()
+    .GetDatabase(builder.Configuration["Mongo:Database"] ?? "orders"));
+builder.Services.AddSingleton<MongoOrderReadModel>();
+builder.Services.AddSingleton<IOrderSearch>(sp => sp.GetRequiredService<MongoOrderReadModel>());
+builder.Services.AddSingleton<IScheduledOrders>(sp => sp.GetRequiredService<MongoOrderReadModel>());
+builder.Services.AddSingleton<OrderProjectionHandler>();
+builder.Services.AddHostedService<RabbitMqOrderProjectionConsumer>();
+builder.Services.AddSingleton<IMarketHours, MarketHours>();
 builder.Services.AddHostedService<ScheduledOrderDispatcher>();
-builder.Services.AddSingleton<IOrderHistory, PostgresOrderHistory>();
+builder.Services.AddSingleton<IOrderHistory, OrderEventHistory>();
 builder.Services.AddSingleton<IOrderNotifier, SignalROrderNotifier>();
 builder.Services.AddSingleton<OrderTransitions>();
 builder.Services.AddSingleton<IOrderTransitions>(sp => sp.GetRequiredService<OrderTransitions>());
@@ -70,12 +78,16 @@ builder.Services.AddHostedService<OutboxPublisherService>();
 builder.Services.AddSingleton<OrderTransitionProcessor>();
 builder.Services.AddSingleton<ExchangeEventMessageHandler>();
 builder.Services.AddHostedService<RabbitMqExchangeEventConsumer>();
-builder.Services.AddSingleton<FundsReservationProcessor>();
-builder.Services.AddSingleton<FundsReservationMessageHandler>();
-builder.Services.AddSingleton<AssetReservationProcessor>();
-builder.Services.AddSingleton<AssetReservationMessageHandler>();
-builder.Services.AddHostedService<RabbitMqFundsReservationConsumer>();
-builder.Services.AddHostedService<RabbitMqAssetReservationConsumer>();
+
+foreach (var (service, fallback) in new[] { (HttpReservationGateway.Account, "http://localhost:8080"), (HttpReservationGateway.Portfolio, "http://localhost:8082") })
+{
+    builder.Services.AddHttpClient(service, client =>
+    {
+        client.BaseAddress = new Uri((builder.Configuration[$"Services:{service}:BaseUrl"] ?? fallback).TrimEnd('/') + "/");
+        client.Timeout = TimeSpan.FromSeconds(10);
+    });
+}
+builder.Services.AddSingleton<IReservationGateway, HttpReservationGateway>();
 
 var app = builder.Build();
 if (string.IsNullOrWhiteSpace(connectionString))

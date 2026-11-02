@@ -65,8 +65,9 @@ public sealed class PortfolioJsonTests
             Ticker.TryCreate("PETR4").ResultValue, Quantity.TryCreate(7).ResultValue, DateTimeOffset.UtcNow).ResultValue;
         var @event = asset.UncommittedEvents[0];
 
-        var json = AssetEventSerializer.Serialize(@event);
-        var restored = AssetEventSerializer.Deserialize(@event.GetType().Name, json);
+        var store = AssetEventStore.Create();
+        var json = store.Serialize(@event);
+        var restored = store.Deserialize(@event.GetType().Name, json);
 
         Assert.Equal(@event, restored);
     }

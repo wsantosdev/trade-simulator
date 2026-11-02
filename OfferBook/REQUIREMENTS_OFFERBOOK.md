@@ -9,7 +9,7 @@ Serve o livro de ofertas em tempo real às UIs. Não tem banco: o livro de cada 
 - Transporte: RabbitMQ (`EventEnvelope<T>`) Exchange -> OfferBook -> SignalR -> UI, somente para tickers com assinantes (heartbeat de interesse, como no Quotes).
 - Publicação a cada mudança do livro ou a cada 1 s (o que ocorrer primeiro); sem mudança, o Exchange envia delta vazio (heartbeat).
 - Snapshot ao iniciar/assinar e deltas durante o dia. Estado só em memória.
-- Pregão 10h–18h (UTC-3). Fora do pregão o livro fica congelado e ordens são rejeitadas (`OrderRejected`) — responsabilidade do Exchange.
+- Bolsa 24/7: o livro nunca fica congelado por horário (fase sempre `Open`).
 - UI página `/offerbook` da UI principal (porta 4200): nível alterado pisca verde se a quantidade aumentou, vermelho se diminuiu, sem piscar se igual.
 
 ## Fluxo

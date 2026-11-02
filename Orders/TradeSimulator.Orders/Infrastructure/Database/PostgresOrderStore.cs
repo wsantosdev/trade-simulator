@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Moonad;
 using Npgsql;
+using TradeSimulator.EventSourcing;
 using NpgsqlTypes;
 using TradeSimulator.Commons.Telemetry;
 using TradeSimulator.Orders.Infrastructure.Messaging;
@@ -17,6 +18,8 @@ namespace TradeSimulator.Orders.Infrastructure.Database;
 public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<PostgresOrderStore> logger)
     : IOrderStore, IOutbox, IOutboxBacklogReader
 {
+    private static readonly EventStore Events = OrderEventSerializer.CreateStore();
+
     public async Task<Result<bool, IOrderError>> InitializeAsync(CancellationToken cancellationToken)
     {
         await using var schemaStream = Assembly.GetExecutingAssembly()
@@ -46,14 +49,14 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
         }
         catch (PostgresException exception) when (
             exception.SqlState == PostgresErrorCodes.UniqueViolation &&
-            exception.ConstraintName == "ux_order_events_request_hash")
+            exception.ConstraintName == "order_requests_pkey")
         {
             logger.LogInformation("Duplicate order submission detected; returning the original order.");
             return await GetByRequestHashAsync(sent.RequestHash, cancellationToken);
         }
         catch (PostgresException exception) when (
             exception.SqlState == PostgresErrorCodes.UniqueViolation &&
-            exception.ConstraintName is "ux_order_events_single_submitted" or "ux_order_events_order_sequence")
+            exception.ConstraintName is "ux_events_single_submitted" or "ux_events_stream_version")
         {
             return new OrderAlreadyExists();
         }
@@ -70,7 +73,7 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
         }
         catch (PostgresException exception) when (
             exception.SqlState == PostgresErrorCodes.UniqueViolation &&
-            exception.ConstraintName == "ux_order_events_order_sequence")
+            exception.ConstraintName == "ux_events_stream_version")
         {
             return new ConcurrencyConflict();
         }
@@ -78,109 +81,67 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
 
     private async Task<Result<Order, IOrderError>> InsertAsync(Order order, CancellationToken cancellationToken)
     {
-        const string sql = """
-            WITH inserted AS (
-                INSERT INTO order_events (order_id, sequence, event_type, payload, request_hash, occurred_at)
-                VALUES (@orderId, @sequence, @eventType, @payload, @requestHash, @occurredAt)
-                RETURNING position
-            )
-            INSERT INTO order_outbox (position, event_type, payload, traceparent)
-            SELECT position, @eventType, @envelope, @traceParent FROM inserted WHERE @published;
+        const string outboxSql = """
+            INSERT INTO event_outbox (position, event_type, payload, traceparent)
+            VALUES (@position, @eventType, @envelope, @traceParent);
             """;
 
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        var sequence = order.Version - order.UncommittedEvents.Count;
-        foreach (var @event in order.UncommittedEvents)
+        var firstVersion = order.Version - order.UncommittedEvents.Count + 1;
+        if (order.UncommittedEvents.OfType<OrderSubmitted>().SingleOrDefault() is { } submitted)
         {
-            sequence++;
-            var published = OrderEventSerializer.IsPublished(@event);
-            await using var command = new NpgsqlCommand(sql, connection, transaction);
-            command.Parameters.AddWithValue("orderId", @event.OrderId.Guid);
-            command.Parameters.AddWithValue("sequence", sequence);
-            command.Parameters.AddWithValue("eventType", @event.GetType().Name);
-            command.Parameters.Add(new NpgsqlParameter("payload", NpgsqlDbType.Jsonb)
-            {
-                Value = OrderEventSerializer.Serialize(@event)
-            });
-            command.Parameters.AddWithValue("requestHash", NpgsqlDbType.Char,
-                @event is OrderSubmitted sent ? sent.RequestHash.Value : DBNull.Value);
-            command.Parameters.AddWithValue("occurredAt", @event.OccurredAt);
+            await using var request = new NpgsqlCommand(
+                "INSERT INTO order_requests (request_hash, stream_id) VALUES (@hash, @stream);", connection, transaction);
+            request.Parameters.AddWithValue("hash", NpgsqlDbType.Char, submitted.RequestHash.Value);
+            request.Parameters.AddWithValue("stream", submitted.StreamId);
+            await request.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var appended = await Events.AppendAsync(connection, transaction, order.UncommittedEvents, firstVersion, cancellationToken);
+        foreach (var entry in appended)
+        {
+            await using var command = new NpgsqlCommand(outboxSql, connection, transaction);
+            command.Parameters.AddWithValue("position", entry.Id);
+            command.Parameters.AddWithValue("eventType", entry.Type);
             command.Parameters.Add(new NpgsqlParameter("envelope", NpgsqlDbType.Jsonb)
             {
-                Value = published ? OrderEventSerializer.SerializeEnvelope(@event) : "null"
+                Value = OrderEventSerializer.SerializeEnvelope((OrderEvent)entry.Event)
             });
-            command.Parameters.AddWithValue("published", published);
             command.Parameters.AddWithValue("traceParent", (object?)ServiceTelemetry.CurrentTraceParent() ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await UpsertReadModelAsync(order, connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        order.MarkCommitted();
+        order.CommitEvents();
         return order;
     }
 
-    private static async Task UpsertReadModelAsync(
-        Order order, NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<StoredOrderEvent>> ReadEventsAsync(OrderId id, CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO order_read_model (
-                order_id, account_id, ticker, side, type, quantity, price, state, executed_quantity,
-                remaining_quantity, average_price, last_price, last_trade_at, sent_at, last_action_at, version)
-            VALUES (
-                @orderId, @accountId, @ticker, @side, @type, @quantity, @price, @state, @executedQuantity,
-                @remainingQuantity, @averagePrice, @lastPrice, @lastTradeAt, @sentAt, @lastActionAt, @version)
-            ON CONFLICT (order_id) DO UPDATE SET
-                price = EXCLUDED.price,
-                state = EXCLUDED.state,
-                executed_quantity = EXCLUDED.executed_quantity,
-                remaining_quantity = EXCLUDED.remaining_quantity,
-                average_price = EXCLUDED.average_price,
-                last_price = EXCLUDED.last_price,
-                last_trade_at = EXCLUDED.last_trade_at,
-                last_action_at = EXCLUDED.last_action_at,
-                version = EXCLUDED.version;
-            """;
-        var view = OrderView.From(order);
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
-        command.Parameters.AddWithValue("orderId", view.Id);
-        command.Parameters.AddWithValue("accountId", view.AccountId);
-        command.Parameters.AddWithValue("ticker", view.Ticker);
-        command.Parameters.AddWithValue("side", view.Side.ToString());
-        command.Parameters.AddWithValue("type", view.Type.ToString());
-        command.Parameters.AddWithValue("quantity", view.Quantity);
-        command.Parameters.AddWithValue("price", NpgsqlDbType.Numeric, (object?)view.Price ?? DBNull.Value);
-        command.Parameters.AddWithValue("state", view.State.ToString());
-        command.Parameters.AddWithValue("executedQuantity", view.ExecutedQuantity);
-        command.Parameters.AddWithValue("remainingQuantity", view.RemainingQuantity);
-        command.Parameters.AddWithValue("averagePrice", NpgsqlDbType.Numeric, (object?)view.AveragePrice ?? DBNull.Value);
-        command.Parameters.AddWithValue("lastPrice", NpgsqlDbType.Numeric, (object?)view.LastPrice ?? DBNull.Value);
-        command.Parameters.AddWithValue("lastTradeAt", NpgsqlDbType.TimestampTz, (object?)view.LastTradeAt ?? DBNull.Value);
-        command.Parameters.AddWithValue("sentAt", view.SentAt);
-        command.Parameters.AddWithValue("lastActionAt", view.LastActionAt);
-        command.Parameters.AddWithValue("version", order.Version);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    public async Task<Result<Order, IOrderError>> GetAsync(OrderId id, CancellationToken cancellationToken)
-    {
-        const string sql = """
-            SELECT event_type, payload::text
-            FROM order_events
-            WHERE order_id = @orderId
-            ORDER BY sequence;
+            SELECT version, event_type, occurred_at, payload::text
+            FROM events
+            WHERE stream_id = @orderId
+            ORDER BY version;
             """;
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("orderId", id.Guid);
-        return await ReadOrderAsync(command, cancellationToken);
+        var events = new List<StoredOrderEvent>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            events.Add(new StoredOrderEvent(reader.GetInt32(0), reader.GetString(1), reader.GetFieldValue<DateTimeOffset>(2), reader.GetString(3)));
+        return events;
     }
+
+    public async Task<Result<Order, IOrderError>> GetAsync(OrderId id, CancellationToken cancellationToken) =>
+        await ReadOrderAsync(id.Guid, cancellationToken);
 
     public async Task<IReadOnlyList<PendingEvent>> ReadPendingAsync(int limit, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT position, event_type, payload::text, traceparent
-            FROM order_outbox
+            FROM event_outbox
             WHERE published_at IS NULL
             ORDER BY position
             LIMIT @limit;
@@ -199,7 +160,7 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
     {
         const string sql = """
             SELECT COUNT(*), COALESCE(EXTRACT(EPOCH FROM now() - MIN(e.occurred_at)), 0)
-            FROM order_outbox o JOIN order_events e ON e.position = o.position
+            FROM event_outbox o JOIN events e ON e.id = o.position
             WHERE o.published_at IS NULL;
             """;
         await using var command = dataSource.CreateCommand(sql);
@@ -211,7 +172,7 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
     public async Task MarkPublishedAsync(long position, CancellationToken cancellationToken)
     {
         const string sql = """
-            UPDATE order_outbox
+            UPDATE event_outbox
             SET published_at = @publishedAt
             WHERE position = @position AND published_at IS NULL;
             """;
@@ -223,35 +184,30 @@ public sealed class PostgresOrderStore(NpgsqlDataSource dataSource, ILogger<Post
 
     private async Task<Result<Order, IOrderError>> GetByRequestHashAsync(RequestHash hash, CancellationToken cancellationToken)
     {
-        const string sql = """
-            SELECT event_type, payload::text
-            FROM order_events
-            WHERE order_id = (SELECT order_id FROM order_events WHERE request_hash = @requestHash)
-            ORDER BY sequence;
-            """;
+        const string sql = "SELECT stream_id FROM order_requests WHERE request_hash = @requestHash;";
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("requestHash", NpgsqlDbType.Char, hash.Value);
-        return await ReadOrderAsync(command, cancellationToken);
+        return await command.ExecuteScalarAsync(cancellationToken) is Guid orderId
+            ? await ReadOrderAsync(orderId, cancellationToken)
+            : new OrderNotFound();
     }
 
-    private static async Task<Result<Order, IOrderError>> ReadOrderAsync(NpgsqlCommand command, CancellationToken cancellationToken)
+    private async Task<Result<Order, IOrderError>> ReadOrderAsync(Guid orderId, CancellationToken cancellationToken)
     {
-        var history = new List<OrderEvent>();
-        var legacyOpening = false;
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        IReadOnlyList<StoredEvent> stored;
+        try
         {
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                var eventType = reader.GetString(0);
-                var payload = reader.GetString(1);
-                legacyOpening |= eventType == OrderEventSerializer.LegacyOpeningType;
-                var @event = OrderEventSerializer.Deserialize(eventType, payload);
-                if (@event is null)
-                    return new CorruptOrderHistory();
-                history.Add(@event);
-            }
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            stored = await Events.ReadStreamAsync(connection, orderId, cancellationToken);
+        }
+        catch (CorruptEventStreamException)
+        {
+            return new CorruptOrderHistory();
         }
 
-        return history.Count == 0 ? new OrderNotFound() : Order.Rehydrate(history, legacyOpening);
+        if (stored.Count == 0)
+            return new OrderNotFound();
+        var legacyOpening = stored.Any(entry => entry.Type == OrderEventSerializer.LegacyOpeningType);
+        return Order.Rehydrate(stored.Select(entry => (OrderEvent)entry.Event).ToList(), legacyOpening);
     }
 }

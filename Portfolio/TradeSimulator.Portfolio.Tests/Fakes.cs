@@ -18,16 +18,20 @@ internal sealed class FakeStore : IAssetStore
     public List<Result<AssetsBlocked, AssetBlockError>> ReservationResponses { get; } = [];
     public HashSet<Guid> SeenEnvelopes { get; } = [];
 
+    public Task<Result<Asset, IPortfolioError>> LoadAsync(Guid assetId, CancellationToken cancellationToken) =>
+        Task.FromResult<Result<Asset, IPortfolioError>>(new AssetNotFound());
+
     public Task<Result<Asset, IPortfolioError>> ReserveAsync(
-        Guid envelopeId, Asset asset, OrderReservation reservation, AssetsBlocked blocked, CancellationToken cancellationToken)
+        Guid envelopeId, Asset asset, OrderReservation reservation, AssetsBlocked blocked, CancellationToken cancellationToken, bool notify = true)
     {
         if (!SeenEnvelopes.Add(envelopeId) || Reservations.ContainsKey(reservation.OrderId))
             return Task.FromResult<Result<Asset, IPortfolioError>>(new DuplicateEnvelope());
 
         Assets[asset.Id] = Asset.Restore(asset.ToSnapshot(), []).ResultValue;
         Reservations[reservation.OrderId] = reservation;
-        ReservationResponses.Add(blocked);
-        asset.MarkCommitted();
+        if (notify)
+            ReservationResponses.Add(blocked);
+        asset.CommitEvents();
         return Task.FromResult<Result<Asset, IPortfolioError>>(asset);
     }
 
@@ -51,7 +55,7 @@ internal sealed class FakeStore : IAssetStore
         if (asset is not null)
         {
             Assets[asset.Id] = Asset.Restore(asset.ToSnapshot(), []).ResultValue;
-            asset.MarkCommitted();
+            asset.CommitEvents();
         }
 
         Reservations[orderId] = Reservations[orderId] with { Remaining = newRemaining, Closed = close };

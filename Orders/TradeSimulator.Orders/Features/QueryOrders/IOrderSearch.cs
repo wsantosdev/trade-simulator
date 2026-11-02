@@ -19,22 +19,23 @@ public sealed record OrderPage(IReadOnlyList<OrderView> Items, int Page, int Pag
 
 public static class OrderSortFields
 {
+    // Sort key -> field of the order document in the read model.
     public static readonly IReadOnlyDictionary<string, string> Columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        ["id"] = "order_id",
+        ["id"] = "_id",
         ["ticker"] = "ticker",
         ["side"] = "side",
         ["type"] = "type",
         ["quantity"] = "quantity",
         ["price"] = "price",
-        ["averagePrice"] = "average_price",
+        ["averagePrice"] = "averagePrice",
         ["state"] = "state",
-        ["executedQuantity"] = "executed_quantity",
-        ["remainingQuantity"] = "remaining_quantity",
-        ["lastPrice"] = "last_price",
-        ["lastTradeAt"] = "last_trade_at",
-        ["sentAt"] = "sent_at",
-        ["lastActionAt"] = "last_action_at"
+        ["executedQuantity"] = "executedQuantity",
+        ["remainingQuantity"] = "remainingQuantity",
+        ["lastPrice"] = "lastPrice",
+        ["lastTradeAt"] = "lastTradeAt",
+        ["sentAt"] = "sentAt",
+        ["lastActionAt"] = "lastActionAt"
     };
 }
 

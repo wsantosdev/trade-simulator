@@ -24,9 +24,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Accounts: Host=postgres;Port=5432;Database=tradesimulator;Username=account;Password=account-local;Search Path=account
+      ConnectionStrings__Accounts: Host=postgres;Port=5432;Database=tradesimulator;Username=tradesimulator;Password=tradesimulator-local;Search Path=account
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
       OfferBook__BaseUrl: http://tradesimulator-offerbook:8080
+      ConnectionStrings__Redis: redis:6379
     stop_grace_period: 40s
     ports:
       - "8080:8080"
@@ -35,6 +36,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   tradesimulator-orders:
     image: tradesimulator-orders
@@ -45,12 +48,18 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       Simulation__SessionClockOffset: ${EXCHANGE_SESSION_CLOCK_OFFSET:-00:00:00}
-      ConnectionStrings__Orders: Host=postgres;Port=5432;Database=tradesimulator;Username=orders;Password=orders-local;Search Path=orders
+      Services__Account__BaseUrl: http://tradesimulator-account:8080
+      Services__Portfolio__BaseUrl: http://tradesimulator-portfolio:8080
+      ConnectionStrings__Orders: Host=postgres;Port=5432;Database=tradesimulator;Username=tradesimulator;Password=tradesimulator-local;Search Path=orders
+      ConnectionStrings__Mongo: mongodb://mongo:27017
+      Mongo__Database: orders
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
     ports:
       - "8081:8080"
     depends_on:
+      mongo:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       rabbitmq:
@@ -66,7 +75,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       Simulation__SessionClockOffset: ${EXCHANGE_SESSION_CLOCK_OFFSET:-00:00:00}
       Seed__Directory: /seed
-      ConnectionStrings__Exchange: Host=postgres;Port=5432;Database=tradesimulator;Username=exchange;Password=exchange-local;Search Path=exchange
+      ConnectionStrings__Exchange: Host=postgres;Port=5432;Database=tradesimulator;Username=tradesimulator;Password=tradesimulator-local;Search Path=exchange
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
     volumes:
@@ -117,19 +126,35 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Portfolio: Host=postgres;Port=5432;Database=tradesimulator;Username=portfolio;Password=portfolio-local;Search Path=portfolio
+      ConnectionStrings__Portfolio: Host=postgres;Port=5432;Database=tradesimulator;Username=tradesimulator;Password=tradesimulator-local;Search Path=portfolio
       ConnectionStrings__Redis: redis:6379
+      ConnectionStrings__Mongo: mongodb://mongo:27017
+      Mongo__Database: portfolio
       RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
     ports:
       - "8082:8080"
     depends_on:
+      mongo:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -173,3 +198,4 @@ services:
 
 volumes:
   postgres-data:
+  mongo-data:

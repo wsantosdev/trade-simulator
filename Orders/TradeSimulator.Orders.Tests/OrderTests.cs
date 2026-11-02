@@ -115,7 +115,7 @@ public sealed class OrderTests
     {
         var sent = Send().ResultValue;
 
-        var restored = Order.Rehydrate(sent.UncommittedEvents);
+        var restored = Order.Rehydrate(sent.UncommittedEvents.Cast<OrderEvent>().ToList());
 
         Assert.False(restored.IsError);
         Assert.Equal(sent.Id, restored.ResultValue.Id);

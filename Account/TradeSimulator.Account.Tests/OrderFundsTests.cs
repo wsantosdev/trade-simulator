@@ -47,13 +47,12 @@ public sealed class OrderFundsTests
     }
 
     [Fact]
-    public async Task Sell_orders_are_discarded_without_response()
+    public async Task Sell_orders_are_not_handled_by_account()
     {
         var store = new FakeStore();
-        await Processor(store).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Sell, OrderType.Limit, 10, 5m), default);
+        var result = await Processor(store).ReserveAsync(Submission(OrderSide.Sell, OrderType.Limit, 10, 5m), default);
 
-        Assert.Equal(1, store.Rejects);
-        Assert.Null(store.LastFailure);
+        Assert.False(result.Reserved);
         Assert.Equal(0, store.Reserves);
     }
 
@@ -61,7 +60,7 @@ public sealed class OrderFundsTests
     public async Task Limit_buy_reserves_quantity_times_price()
     {
         var store = new FakeStore();
-        await Processor(store).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Limit, 10, 5.5m), default);
+        await Processor(store).ReserveAsync(Submission(OrderSide.Buy, OrderType.Limit, 10, 5.5m), default);
 
         Assert.Equal(55m, store.ReservedAmount);
     }
@@ -70,7 +69,7 @@ public sealed class OrderFundsTests
     public async Task Market_buy_uses_best_ask_with_margin()
     {
         var store = new FakeStore();
-        await Processor(store, 20m).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Market, 2, null), default);
+        await Processor(store, 20m).ReserveAsync(Submission(OrderSide.Buy, OrderType.Market, 2, null), default);
 
         Assert.Equal(42m, store.ReservedAmount);
     }
@@ -79,9 +78,9 @@ public sealed class OrderFundsTests
     public async Task Market_buy_without_price_fails_with_price_unavailable()
     {
         var store = new FakeStore();
-        await Processor(store, null).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Market, 2, null), default);
+        var result = await Processor(store, null).ReserveAsync(Submission(OrderSide.Buy, OrderType.Market, 2, null), default);
 
-        Assert.Equal(FundsReservationErrorKind.PriceUnavailable, store.LastFailure!.Kind);
+        Assert.Equal(FundsReservationErrorKind.PriceUnavailable, result.Kind);
         Assert.Equal(0, store.Reserves);
     }
 
@@ -89,9 +88,32 @@ public sealed class OrderFundsTests
     public async Task Insufficient_funds_produces_failure_response()
     {
         var store = new FakeStore { ReserveError = new ReservationExceedsAvailableBalance() };
-        await Processor(store).ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Limit, 10, 5m), default);
+        var gate = new FakeGate();
+        var result = await Processor(store, gate: gate).ReserveAsync(Submission(OrderSide.Buy, OrderType.Limit, 10, 5m), default);
 
-        Assert.Equal(FundsReservationErrorKind.InsufficientFunds, store.LastFailure!.Kind);
+        Assert.Equal(FundsReservationErrorKind.InsufficientFunds, result.Kind);
+        Assert.Equal(1, gate.Compensations);
+    }
+
+    [Fact]
+    public async Task Gate_rejection_never_reaches_the_store()
+    {
+        var store = new FakeStore();
+        var result = await Processor(store, gate: new FakeGate { Result = FundsGateResult.Insufficient })
+            .ReserveAsync(Submission(OrderSide.Buy, OrderType.Limit, 10, 5m), default);
+
+        Assert.Equal(FundsReservationErrorKind.InsufficientFunds, result.Kind);
+        Assert.Equal(0, store.Reserves);
+    }
+
+    [Fact]
+    public async Task Gate_miss_hydrates_the_balance_and_retries()
+    {
+        var gate = new FakeGate { MissOnce = true };
+        var result = await Processor(new FakeStore(), gate: gate).ReserveAsync(Submission(OrderSide.Buy, OrderType.Limit, 10, 5m), default);
+
+        Assert.True(result.Reserved);
+        Assert.Equal(1, gate.Hydrations);
     }
 
     [Fact]
@@ -132,11 +154,9 @@ public sealed class OrderFundsTests
     {
         var metrics = new FakeMetrics();
         await Processor(new FakeStore(), metrics: metrics)
-            .ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Sell, OrderType.Limit, 10, 5m), default);
-        await Processor(new FakeStore(), metrics: metrics)
-            .ReserveAsync(Guid.CreateVersion7(), Submission(OrderSide.Buy, OrderType.Limit, 10, 5m), default);
+            .ReserveAsync(Submission(OrderSide.Buy, OrderType.Limit, 10, 5m), default);
 
-        Assert.Equal(["ignored_not_buy", "reserved"], metrics.Reservations);
+        Assert.Equal(["reserved"], metrics.Reservations);
     }
 
     [Fact]
@@ -153,8 +173,8 @@ public sealed class OrderFundsTests
         Assert.Equal(10m, back.Event.ResultValue.Amount);
     }
 
-    private static OrderFundsProcessor Processor(FakeStore store, decimal? ask = 1m, FakeMetrics? metrics = null) =>
-        new(store, new FakeOfferBook(ask), metrics ?? new FakeMetrics(), NullLogger<OrderFundsProcessor>.Instance);
+    private static OrderFundsProcessor Processor(FakeStore store, decimal? ask = 1m, FakeMetrics? metrics = null, FakeGate? gate = null) =>
+        new(store, new FakeAccounts(), gate ?? new FakeGate(), new FakeOfferBook(ask), metrics ?? new FakeMetrics(), NullLogger<OrderFundsProcessor>.Instance);
 
     private sealed class FakeMetrics : IAccountMetrics
     {
@@ -179,6 +199,52 @@ public sealed class OrderFundsTests
                 : Result<decimal, IAccountError>.Ok(ask.Value));
     }
 
+    private sealed class FakeGate : IFundsGate
+    {
+        public FundsGateResult Result = FundsGateResult.Reserved;
+        public bool MissOnce;
+        public int Hydrations, Compensations;
+
+        public Task<FundsGateResult> TryReserveAsync(AccountId accountId, OrderId orderId, long cents, CancellationToken cancellationToken)
+        {
+            if (!MissOnce)
+                return Task.FromResult(Result);
+            MissOnce = false;
+            return Task.FromResult(FundsGateResult.Miss);
+        }
+
+        public Task HydrateAsync(AccountId accountId, long availableCents, CancellationToken cancellationToken)
+        {
+            Hydrations++;
+            return Task.CompletedTask;
+        }
+
+        public Task CompensateAsync(AccountId accountId, OrderId orderId, CancellationToken cancellationToken)
+        {
+            Compensations++;
+            return Task.CompletedTask;
+        }
+
+        public Task InvalidateAsync(AccountId accountId, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FakeAccounts : TradeSimulator.Account.Features.Shared.IAccountStore
+    {
+        public Task<Result<Domain.Entities.Account, IAccountError>> OpenAsync(AccountId id, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<Result<Domain.Entities.Account, IAccountError>> ExecuteAsync(
+            AccountId id,
+            Func<Domain.Entities.Account, Result<Domain.Entities.Account, IAccountError>> operation,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<Result<Domain.Entities.Account, IAccountError>> GetAsync(AccountId id, CancellationToken cancellationToken)
+        {
+            var account = Domain.Entities.Account.Open(id).ResultValue;
+            account.Deposit(1_000m);
+            return Task.FromResult(Result<Domain.Entities.Account, IAccountError>.Ok(account));
+        }
+    }
+
     private sealed class FakeStore : IOrderFundsStore
     {
         public int Reserves, Rejects, Releases;
@@ -188,7 +254,7 @@ public sealed class OrderFundsTests
         public OrderFundsOutcome Outcome = OrderFundsOutcome.Applied;
         public FundsReservationFailure? LastFailure;
 
-        public Task<Result<OrderFundsOutcome, IAccountError>> ReserveAsync(Guid envelopeId, OrderId orderId, AccountId accountId, decimal amount, CancellationToken cancellationToken)
+        public Task<Result<OrderFundsOutcome, IAccountError>> ReserveAsync(Guid envelopeId, OrderId orderId, AccountId accountId, decimal amount, CancellationToken cancellationToken, bool notify = true)
         {
             if (ReserveError is not null)
                 return Task.FromResult(Result<OrderFundsOutcome, IAccountError>.Error(ReserveError));

@@ -14,7 +14,8 @@ public interface IOrderFundsStore
         OrderId orderId,
         AccountId accountId,
         decimal amount,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        bool notify = true);
 
     // Remembers the order as having no reservation and queues the failure response (when there is one).
     Task<OrderFundsOutcome> RejectAsync(

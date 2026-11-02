@@ -25,7 +25,7 @@ public sealed class OutboxPublisherService(IOutbox outbox, ICommandPublisher pub
                 }
 
                 if (pending.Count == 0)
-                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                    await Task.Delay(TimeSpan.FromMilliseconds(200), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

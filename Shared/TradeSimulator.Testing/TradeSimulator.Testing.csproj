@@ -10,6 +10,7 @@
 
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+        <PackageReference Include="Testcontainers.MongoDb" Version="4.13.0" />
         <PackageReference Include="Testcontainers.PostgreSql" Version="4.13.0" />
         <PackageReference Include="Testcontainers.RabbitMq" Version="4.13.0" />
         <PackageReference Include="Testcontainers.Redis" Version="4.13.0" />

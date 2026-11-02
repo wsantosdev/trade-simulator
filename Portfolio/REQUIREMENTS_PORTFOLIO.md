@@ -78,12 +78,12 @@ Rastreamento: depósito, retirada e desbloqueio **não** são correlacionados po
 - Redis (container no Docker Compose): a chave é o id do envelope, o valor é `1` e o TTL é de 1 hora. Em caso de *hit* a mensagem é rejeitada.
 - **Lock distribuído:** antes de processar, o consumidor adquire `lock:{id}` (`SET NX PX 30s`, valor = token do dono, liberado por compare-and-delete em Lua). Se outro worker detém o lock, a mensagem sofre *requeue* (não é descartada).
 - A chave `{id}` (valor `1`, TTL 1h) só é gravada **após** o resultado ficar durável (estado persistido ou resposta de falha de negócio publicada). Falhas de infraestrutura nunca gravam a chave, então o reprocessamento é permitido sem apagar nada; erros de negócio mantêm a chave.
-- **Guarda durável:** `portfolio_outbox.envelope_id` tem índice único; se a chave Redis se perder após o commit, o reprocessamento é rejeitado pelo banco (`DuplicateEnvelope`) sem aplicar duas vezes. Por isso as linhas do outbox não devem ser expurgadas.
+- **Guarda durável:** `event_outbox.envelope_id` tem índice único; se a chave Redis se perder após o commit, o reprocessamento é rejeitado pelo banco (`DuplicateEnvelope`) sem aplicar duas vezes. Por isso as linhas do outbox não devem ser expurgadas.
 
 ## CQRS (modelo de leitura)
 
-- Escrita: eventos por ativo (`asset_events`/`asset_snapshots`) e `active_assets`, que guarda apenas a versão (concorrência otimista) e a unicidade conta + ticker.
-- Leitura: tabela `asset_read_model` (`asset_id`, `account_id`, `ticker`, `available`, `blocked`, `total`), projetada na mesma transação dos eventos; ativo com total zero é removido dela.
+- Escrita: eventos por ativo (`events`/`snapshots` (schema `portfolio`)) e `active_assets`, que guarda apenas a versão (concorrência otimista) e a unicidade conta + ticker.
+- Leitura: coleção `assets` do **MongoDB** (`_id`, `accountId`, `ticker`, `available`, `blocked`, `total`), alimentada pelo `AssetProjectionHandler`, acionado por cada evento do outbox (`asset.changed`) (eventualmente consistente); ativo com total zero é removido dela.
 - Modelo trafegado para a UI (HTTP e SignalR): `AssetItem` com apenas `ticker`, `available`, `blocked` e `total`. Os ids ficam somente no banco.
 
 ## API HTTP (somente consulta)

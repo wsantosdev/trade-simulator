@@ -7,7 +7,7 @@ using TradeSimulator.Exchange.Processors.Quotes;
 namespace TradeSimulator.Exchange.Simulation;
 
 // Keeps the intraday state of every ticker with subscribers in memory (nothing is persisted: after a restart the
-// day is simulated again from the opening) and emits one quote per active ticker for each cycle.
+// day is simulated again from midnight) and emits one quote per active ticker for each cycle.
 // Calls are serialized by a gate: the quote cycle and the match engine (user orders) both use it.
 public sealed class QuoteSimulator(
     IQuoteSimulationSource source,
@@ -70,20 +70,10 @@ public sealed class QuoteSimulator(
             return state.CachedQuote;
 
         var parameters = state.Parameters;
-        Quote quote;
-        if (position.Phase == SessionPhase.PreOpen)
-        {
-            var previousClose = parameters.PreviousClose;
-            quote = new Quote(ticker.Value, previousClose, previousClose, previousClose, previousClose, previousClose,
-                QuoteVariation.Unchanged, now);
-        }
-        else
-        {
-            state.Walk.AdvanceTo(position.Step);
-            var walk = state.Walk;
-            quote = new Quote(ticker.Value, parameters.Open, parameters.PreviousClose, walk.High, walk.Low, walk.Last,
-                VariationOf(walk.Last, state.PreviousLast), now);
-        }
+        state.Walk.AdvanceTo(position.Step);
+        var walk = state.Walk;
+        var quote = new Quote(ticker.Value, parameters.Open, parameters.PreviousClose, walk.High, walk.Low, walk.Last,
+            VariationOf(walk.Last, state.PreviousLast), now);
 
         state.PreviousLast = quote.Last;
         state.CachedQuote = quote;

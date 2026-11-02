@@ -13,6 +13,7 @@ public sealed class PortfolioMessageHandlerTests
     private readonly FakeStore _store = new();
     private readonly FakeIdempotency _idempotency = new();
     private readonly FakeResponses _responses = new();
+    private readonly PortfolioCommandProcessor _processor;
     private readonly PortfolioCommandMessageHandler _commands;
     private readonly OrderEventMessageHandler _orders;
     private readonly ExchangeEventMessageHandler _exchange;
@@ -20,7 +21,7 @@ public sealed class PortfolioMessageHandlerTests
 
     public PortfolioMessageHandlerTests()
     {
-        var processor = new PortfolioCommandProcessor(
+        var processor = _processor = new PortfolioCommandProcessor(
             _store, _idempotency, _responses, new FakeNotifier(), new FakeMetrics(), TimeProvider.System, NullLogger<PortfolioCommandProcessor>.Instance);
         _commands = new(processor, NullLogger<PortfolioCommandMessageHandler>.Instance);
         _orders = new(processor, NullLogger<OrderEventMessageHandler>.Instance);
@@ -102,31 +103,54 @@ public sealed class PortfolioMessageHandlerTests
     }
 
     [Fact]
-    public async Task Sell_order_submitted_blocks_the_quantity_and_buy_order_is_discarded()
+    public async Task Sell_order_submitted_events_are_no_longer_handled_asynchronously()
     {
         await _commands.HandleAsync(Command("Deposit", "PETR4", 100), default);
 
-        await _orders.HandleAsync(OrderSubmitted("Buy", 40, Guid.CreateVersion7()), default);
-        Assert.Equal(0, Assert.Single(_store.Assets.Values).Blocked.Value);
+        await _orders.HandleAsync(OrderSubmitted("Sell", 40, Guid.CreateVersion7()), default);
 
-        var orderId = Guid.CreateVersion7();
-        await _orders.HandleAsync(OrderSubmitted("Sell", 40, orderId), default);
-        var asset = Assert.Single(_store.Assets.Values);
-        Assert.Equal(40, asset.Blocked.Value);
-        Assert.Equal(60, asset.Available.Value);
-        Assert.Equal(orderId, Assert.Single(_store.ReservationResponses).ResultValue.OrderId);
+        Assert.Equal(0, Assert.Single(_store.Assets.Values).Blocked.Value);
+        Assert.Empty(_store.ReservationResponses);
     }
 
     [Fact]
-    public async Task Sell_order_above_available_fails_and_other_order_events_are_ignored()
+    public async Task Sync_sell_reservation_blocks_the_quantity_without_notifying_through_the_outbox()
     {
+        await _commands.HandleAsync(Command("Deposit", "PETR4", 100), default);
+        var orderId = Guid.CreateVersion7();
+
+        var result = await _processor.ReserveSyncAsync(new SellOrder(orderId, _account, "PETR4", 40), default);
+
+        Assert.True(result.Reserved);
+        var asset = Assert.Single(_store.Assets.Values);
+        Assert.Equal(40, asset.Blocked.Value);
+        Assert.Equal(60, asset.Available.Value);
+        Assert.Empty(_store.ReservationResponses);
+    }
+
+    [Fact]
+    public async Task Sync_sell_above_available_or_without_position_is_rejected()
+    {
+        var none = await _processor.ReserveSyncAsync(new SellOrder(Guid.CreateVersion7(), _account, "PETR4", 5), default);
+        Assert.Equal(AssetBlockErrorKind.AssetNotFound, none.Kind);
+
         await _commands.HandleAsync(Command("Deposit", "PETR4", 10), default);
+        var above = await _processor.ReserveSyncAsync(new SellOrder(Guid.CreateVersion7(), _account, "PETR4", 40), default);
 
-        await _orders.HandleAsync(OrderSubmitted("Sell", 40, Guid.CreateVersion7()), default);
-        await _orders.HandleAsync(Envelope("OrderAcked", new { orderId = Guid.CreateVersion7() }), default);
+        Assert.Equal(AssetBlockErrorKind.InsufficientQuantity, above.Kind);
+        Assert.Equal(0, Assert.Single(_store.Assets.Values).Blocked.Value);
+    }
 
-        Assert.Equal(AssetBlockErrorKind.InsufficientQuantity, Assert.Single(_store.ReservationResponses).ErrorValue.Kind);
-        Assert.Empty(_responses.Failures);
+    [Fact]
+    public async Task Sync_sell_reservation_is_idempotent_per_order()
+    {
+        await _commands.HandleAsync(Command("Deposit", "PETR4", 100), default);
+        var order = new SellOrder(Guid.CreateVersion7(), _account, "PETR4", 40);
+
+        Assert.True((await _processor.ReserveSyncAsync(order, default)).Reserved);
+        Assert.True((await _processor.ReserveSyncAsync(order, default)).Reserved);
+
+        Assert.Equal(40, Assert.Single(_store.Assets.Values).Blocked.Value);
     }
 
     [Fact]
@@ -138,21 +162,6 @@ public sealed class PortfolioMessageHandlerTests
 
         Assert.Empty(_responses.Failures);
         Assert.Empty(_store.ReservationResponses);
-    }
-
-    [Fact]
-    public async Task Duplicated_order_submitted_does_not_block_twice()
-    {
-        await _commands.HandleAsync(Command("Deposit", "PETR4", 100), default);
-        var message = OrderSubmitted("Sell", 40, Guid.CreateVersion7(), id: Guid.CreateVersion7());
-
-        await _orders.HandleAsync(message, default);
-        await _orders.HandleAsync(message, default);
-        _idempotency.Processed.Clear();
-        await _orders.HandleAsync(message, default);
-
-        Assert.Equal(40, Assert.Single(_store.Assets.Values).Blocked.Value);
-        Assert.Single(_store.ReservationResponses);
     }
 
     [Fact]
@@ -219,7 +228,7 @@ public sealed class PortfolioMessageHandlerTests
     {
         await _commands.HandleAsync(Command("Deposit", "PETR4", 100), default);
         var orderId = Guid.CreateVersion7();
-        await _orders.HandleAsync(OrderSubmitted("Sell", quantity, orderId), default);
+        await _processor.ReserveSyncAsync(new SellOrder(orderId, _account, "PETR4", quantity), default);
         return orderId;
     }
 }

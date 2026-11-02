@@ -5,11 +5,14 @@ using TradeSimulator.Account.Common;
 using TradeSimulator.Account.Domain;
 using TradeSimulator.Account.Domain.Enums;
 using TradeSimulator.Account.Domain.ValueObjects;
+using TradeSimulator.Account.Features.Shared;
 
 namespace TradeSimulator.Account.Processors.OrderFunds;
 
 public sealed class OrderFundsProcessor(
     IOrderFundsStore store,
+    IAccountStore accounts,
+    IFundsGate gate,
     IOfferBookClient offerBook,
     IAccountMetrics metrics,
     ILogger<OrderFundsProcessor> logger)
@@ -18,46 +21,82 @@ public sealed class OrderFundsProcessor(
 
     private readonly ConcurrentDictionary<Guid, int> _fillAttempts = new();
 
-    // Throws only on infrastructure failures (the message must be redelivered).
-    public async Task ReserveAsync(Guid envelopeId, OrderSubmission submission, CancellationToken cancellationToken)
+    // Synchronous reservation. Business failures come back as a result; only infrastructure failures throw.
+    // The order id doubles as the envelope id, so repeating the call for the same order is idempotent.
+    public async Task<FundsReservationResult> ReserveAsync(OrderSubmission submission, CancellationToken cancellationToken)
     {
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
-        var result = await ReserveCoreAsync(envelopeId, submission, cancellationToken);
-        metrics.ReservationCompleted(result, System.Diagnostics.Stopwatch.GetElapsedTime(started));
+        var result = await ReserveCoreAsync(submission, cancellationToken);
+        metrics.ReservationCompleted(
+            result.Reserved ? "reserved" : "rejected_" + result.Kind, System.Diagnostics.Stopwatch.GetElapsedTime(started));
+        return result;
     }
 
-    private async Task<string> ReserveCoreAsync(Guid envelopeId, OrderSubmission submission, CancellationToken cancellationToken)
+    private async Task<FundsReservationResult> ReserveCoreAsync(OrderSubmission submission, CancellationToken cancellationToken)
     {
         var orderId = submission.OrderId;
         if (submission.Side != OrderSide.Buy)
-        {
-            var ignored = await store.RejectAsync(envelopeId, orderId, "NotABuyOrder", null, cancellationToken);
-            logger.LogDebug("Discarded non-buy order {OrderId} ({Outcome}).", orderId.Guid, ignored);
-            return "ignored_not_buy";
-        }
+            return FundsReservationResult.Failure(FundsReservationErrorKind.InvalidOrder);
 
         var amount = await ComputeAmountAsync(submission, cancellationToken);
         if (amount.IsError)
-        {
-            return await RejectAsync(envelopeId, submission, amount.ErrorValue, cancellationToken);
-        }
+            return await RejectAsync(submission, amount.ErrorValue, cancellationToken);
 
         var account = AccountId.TryCreate(submission.AccountId);
         if (account.IsError)
+            return await RejectAsync(submission, account.ErrorValue, cancellationToken);
+
+        var cents = (long)Math.Round(amount.ResultValue * 100m, MidpointRounding.AwayFromZero);
+        var admitted = await gate.TryReserveAsync(account.ResultValue, orderId, cents, cancellationToken);
+        if (admitted == FundsGateResult.Miss)
         {
-            return await RejectAsync(envelopeId, submission, account.ErrorValue, cancellationToken);
+            var loaded = await accounts.GetAsync(account.ResultValue, cancellationToken);
+            if (loaded.IsError)
+                return await RejectAsync(submission, loaded.ErrorValue, cancellationToken);
+
+            await gate.HydrateAsync(
+                account.ResultValue, (long)Math.Round(loaded.ResultValue.AvailableBalance * 100m, MidpointRounding.AwayFromZero), cancellationToken);
+            admitted = await gate.TryReserveAsync(account.ResultValue, orderId, cents, cancellationToken);
         }
 
-        var reserved = await store.ReserveAsync(envelopeId, orderId, account.ResultValue, amount.ResultValue, cancellationToken);
+        if (admitted == FundsGateResult.Insufficient)
+        {
+            await store.RejectAsync(orderId.Guid, orderId, "ReservationExceedsAvailableBalance", null, cancellationToken);
+            return FundsReservationResult.Failure(FundsReservationErrorKind.InsufficientFunds);
+        }
+
+        if (admitted != FundsGateResult.Reserved)
+            throw new InvalidOperationException($"Funds gate unavailable for order {orderId.Guid}.");
+
+        Result<OrderFundsOutcome, IAccountError> reserved;
+        try
+        {
+            reserved = await store.ReserveAsync(orderId.Guid, orderId, account.ResultValue, amount.ResultValue, cancellationToken, notify: false);
+        }
+        catch
+        {
+            await gate.CompensateAsync(account.ResultValue, orderId, CancellationToken.None);
+            throw;
+        }
+
         if (reserved.IsError)
         {
-            return await RejectAsync(envelopeId, submission, reserved.ErrorValue, cancellationToken);
+            await gate.CompensateAsync(account.ResultValue, orderId, CancellationToken.None);
+            return await RejectAsync(submission, reserved.ErrorValue, cancellationToken);
         }
 
         logger.LogInformation(
             "Order {OrderId}: reservation of {Amount} for account {AccountId} ({Outcome}).",
             orderId.Guid, amount.ResultValue, submission.AccountId, reserved.ResultValue);
-        return reserved.ResultValue == OrderFundsOutcome.Applied ? "reserved" : "duplicate";
+        return FundsReservationResult.Success(amount.ResultValue);
+    }
+
+    // Reverts a reservation made by ReserveAsync (order cancelled, or the submission failed after the reservation).
+    public async Task ReleaseAsync(OrderId orderId, CancellationToken cancellationToken)
+    {
+        var result = await store.ReleaseAsync(Guid.CreateVersion7(), orderId, cancellationToken);
+        if (result.IsError)
+            throw new InvalidOperationException($"Could not release order {orderId.Guid}: {result.ErrorValue.GetType().Name}.");
     }
 
     public async Task SettleFillAsync(
@@ -141,7 +180,7 @@ public sealed class OrderFundsProcessor(
         }
     }
 
-    private async Task<string> RejectAsync(Guid envelopeId, OrderSubmission submission, IAccountError error, CancellationToken cancellationToken)
+    private async Task<FundsReservationResult> RejectAsync(OrderSubmission submission, IAccountError error, CancellationToken cancellationToken)
     {
         var kind = error switch
         {
@@ -157,8 +196,7 @@ public sealed class OrderFundsProcessor(
             throw new InvalidOperationException($"Could not reserve funds of order {submission.OrderId.Guid}: {error.GetType().Name}.");
 
         logger.LogWarning("Order {OrderId}: reservation failed ({Kind}).", submission.OrderId.Guid, kind);
-        var failure = new FundsReservationFailure(submission.OrderId.Guid, submission.AccountId, kind.Value, error.GetType().Name);
-        await store.RejectAsync(envelopeId, submission.OrderId, kind.Value.ToString(), failure, cancellationToken);
-        return "rejected_" + kind.Value;
+        await store.RejectAsync(submission.OrderId.Guid, submission.OrderId, kind.Value.ToString(), null, cancellationToken);
+        return FundsReservationResult.Failure(kind.Value);
     }
 }

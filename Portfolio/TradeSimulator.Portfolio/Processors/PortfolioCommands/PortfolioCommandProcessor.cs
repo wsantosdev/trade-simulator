@@ -39,6 +39,71 @@ public sealed class PortfolioCommandProcessor(
             ApplyAsync(envelopeId, new Command(AssetOperation.Block, order.AccountId, order.Ticker, order.Quantity, order.OrderId), token),
             cancellationToken);
 
+    // Synchronous validation of a sell order: blocks the quantity under optimistic concurrency (the asset stream
+    // version), retrying when another order moved it first, so two orders can never block the same quantity.
+    public async Task<PositionReservationResult> ReserveSyncAsync(SellOrder order, CancellationToken cancellationToken)
+    {
+        var account = AccountId.TryCreate(order.AccountId);
+        var ticker = Ticker.TryCreate(order.Ticker);
+        var quantity = Quantity.TryCreate(order.Quantity);
+        if (account.IsError || ticker.IsError || quantity.IsError)
+            return Rejected(AssetBlockErrorKind.InvalidOrder, order.OrderId);
+
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            var found = await store.FindAsync(account.ResultValue, ticker.ResultValue, cancellationToken);
+            if (found.IsError)
+            {
+                return found.ErrorValue is AssetNotFound
+                    ? Rejected(AssetBlockErrorKind.AssetNotFound, order.OrderId)
+                    : throw new InvalidOperationException($"Could not load the asset: {found.ErrorValue.GetType().Name}.");
+            }
+
+            var asset = found.ResultValue;
+            var blockedResult = asset.Block(quantity.ResultValue, clock.GetUtcNow());
+            if (blockedResult.IsError)
+            {
+                return blockedResult.ErrorValue is InsufficientAvailableQuantity
+                    ? Rejected(AssetBlockErrorKind.InsufficientQuantity, order.OrderId)
+                    : throw new InvalidOperationException($"Could not block: {blockedResult.ErrorValue.GetType().Name}.");
+            }
+
+            var reservation = new OrderReservation(order.OrderId, order.AccountId, ticker.ResultValue.Value, order.Quantity, order.Quantity, false);
+            var blocked = new AssetsBlocked(order.OrderId, order.AccountId, ticker.ResultValue.Value, order.Quantity);
+            var saved = await store.ReserveAsync(order.OrderId, asset, reservation, blocked, cancellationToken, notify: false);
+            if (!saved.IsError)
+            {
+                metrics.ReservationBlocked();
+                await NotifyAsync(asset, cancellationToken);
+                return new PositionReservationResult(true, null);
+            }
+
+            // Already reserved by a previous attempt of the same order.
+            if (saved.ErrorValue is DuplicateEnvelope)
+                return new PositionReservationResult(true, null);
+
+            if (saved.ErrorValue is not (ConcurrencyConflict or AssetAlreadyExists))
+                throw new InvalidOperationException($"Could not persist the block of order {order.OrderId}: {saved.ErrorValue.GetType().Name}.");
+        }
+
+        throw new InvalidOperationException($"Could not block order {order.OrderId} after {MaxAttempts} concurrent attempts.");
+    }
+
+    // Compensation of a synchronous reservation: releases whatever is still blocked for the order.
+    public async Task ReleaseSyncAsync(Guid orderId, CancellationToken cancellationToken)
+    {
+        if (await store.FindReservationAsync(orderId, cancellationToken) is null)
+            return;
+        await SettleAsync(Guid.CreateVersion7(), orderId, 0, true, cancellationToken);
+    }
+
+    private PositionReservationResult Rejected(AssetBlockErrorKind kind, Guid orderId)
+    {
+        metrics.ReservationRejected(kind.ToString());
+        logger.LogWarning("Order {OrderId}: asset block failed ({Kind}).", orderId, kind);
+        return new PositionReservationResult(false, kind);
+    }
+
     // Fills withdraw the executed quantity from the blocked one of the order; the final event
     // (last fill, cancel, reject) unblocks what is left.
     public Task SettleOrderAsync(Guid envelopeId, Guid orderId, long executedQuantity, bool final, CancellationToken cancellationToken) =>
@@ -343,3 +408,6 @@ public sealed class PortfolioCommandProcessor(
         await responses.PublishFailureAsync(failure, cancellationToken);
     }
 }
+
+
+public sealed record PositionReservationResult(bool Reserved, AssetBlockErrorKind? Kind);

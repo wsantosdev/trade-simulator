@@ -47,7 +47,17 @@ public sealed class RabbitMqResponsePublisher(IConfiguration configuration) : IR
             }
 
             if (_declared.Add(exchange))
+            {
                 await _channel.ExchangeDeclareAsync(exchange, ExchangeType.Topic, durable: true, cancellationToken: cancellationToken);
+                if (exchange == ExchangeName)
+                {
+                    // Bound before the first event so none is dropped while the projection consumer is still starting.
+                    await _channel.QueueDeclareAsync(
+                        AssetProjectionConsumer.Queue, durable: true, exclusive: false, autoDelete: false, cancellationToken: cancellationToken);
+                    await _channel.QueueBindAsync(
+                        AssetProjectionConsumer.Queue, ExchangeName, AssetChanged.RoutingKey, cancellationToken: cancellationToken);
+                }
+            }
 
             var properties = new BasicProperties { ContentType = "application/json", DeliveryMode = DeliveryModes.Persistent };
             if (activity?.Id is { } id)
