@@ -25,11 +25,14 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Accounts: Host=postgres;Port=5432;Database=tradesimulator;Username=tradesimulator;Password=tradesimulator-local;Search Path=account
+      RabbitMq__Uri: amqp://account:account-local@rabbitmq:5672/
     stop_grace_period: 40s
     ports:
       - "8080:8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   tradesimulator-orders:
